@@ -1,0 +1,99 @@
+/* motion.css — Panel core MOTION REGISTRY.
+   Single source of truth for the shared, PARAMETERIZED animation primitives every surface reuses
+   (core dashboard + modules). One keyframe + one utility class per primitive; parameters ride on
+   --mo-* custom properties so the SAME motion reskins per caller. Loaded once by dashboard.html;
+   module chat.css (injected into the same page by settings.js) references these keyframes/classes
+   directly — a module NEVER redefines a shared keyframe, it reuses these or registers its own.
+   Manifest, intent, and the mapping of what each primitive replaced: ../../motion.json.
+
+   Two ways to consume a primitive:
+     1. add the class  → <span class="mo-flow" style="--mo-dur:1.1s;--mo-count:2">   (new work, cards)
+     2. reference the keyframe from your own selector → .x{animation:mo-flow 1.1s linear infinite}
+   The class ships its own reduced-motion fallback; selector-form callers keep their own. */
+
+/* ---- spin — "working" (loop) ---- */
+@keyframes mo-spin{to{transform:rotate(360deg)}}
+.mo-spin{animation:mo-spin var(--mo-dur,.8s) linear var(--mo-count,infinite)}
+
+/* ---- pop — "this just appeared" (one-shot spring scale-in, holds its end state) ---- */
+@keyframes mo-pop{0%{opacity:0;transform:scale(var(--mo-from,.3))}
+ 60%{opacity:1;transform:scale(var(--mo-over,1.15))}100%{opacity:1;transform:scale(1)}}
+.mo-pop{opacity:0;animation:mo-pop var(--mo-dur,.4s) var(--mo-ease,cubic-bezier(.2,1.4,.4,1)) var(--mo-delay,0s) both}
+
+/* ---- rise — "enter from just below + fade" (one-shot) ---- */
+@keyframes mo-rise{from{opacity:0;transform:translateY(var(--mo-dist,7px))}to{opacity:1;transform:none}}
+.mo-rise{animation:mo-rise var(--mo-dur,.3s) var(--mo-ease,cubic-bezier(.22,1,.36,1)) var(--mo-delay,0s) both}
+
+/* ---- flow — "a packet crosses a track" (transfer). count:infinite while active, a number for a
+        finite send. Caller supplies a position:relative track and an absolutely-placed packet. ---- */
+@keyframes mo-flow{0%{left:0;opacity:0}12%{opacity:1}88%{opacity:1}100%{left:100%;opacity:0}}
+.mo-flow{animation:mo-flow var(--mo-dur,1.1s) linear var(--mo-count,infinite)}
+
+/* ---- shimmer — "a light sweep across a track/text" (loading / heartbeat). Caller sets
+        background-size (e.g. 200% 100%) on the target. ---- */
+@keyframes mo-shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
+.mo-shimmer{animation:mo-shimmer var(--mo-dur,1.1s) linear var(--mo-count,infinite)}
+
+/* ---- pulse — "alive / you are here" (gentle opacity throb, loop) ---- */
+@keyframes mo-pulse{50%{opacity:var(--mo-mid,.4)}}
+.mo-pulse{animation:mo-pulse var(--mo-dur,1.4s) ease-in-out var(--mo-count,infinite)}
+
+/* ---- view transitions — real state moved by a completed user action ----
+   The root snapshot stays still. Each caller names only the object whose meaning changed:
+   a waiting card becoming a commit, the remote marker crossing sent commits, or the selected
+   project pane. Geometry is handled on compositor snapshots; authored motion stays transform /
+   opacity only. */
+html[data-panel-transition]::view-transition-old(root){animation:none;opacity:0}
+html[data-panel-transition]::view-transition-new(root){animation:none}
+
+html[data-panel-transition="git-commit"] .card.is-packing,
+html[data-panel-transition="git-commit"] .stone.is-head.mo-pop{view-transition-name:panel-git-commit}
+html[data-panel-transition="git-commit"] .stone.is-head.mo-pop{animation:none;opacity:1;transform:none}
+html[data-panel-transition="git-commit"]::view-transition-group(panel-git-commit){
+ animation-duration:var(--base,240ms);animation-timing-function:var(--ease,ease)
+}
+html[data-panel-transition="git-commit"]::view-transition-old(panel-git-commit){
+ animation:mo-fold-out var(--base,240ms) var(--ease,ease) both
+}
+html[data-panel-transition="git-commit"]::view-transition-new(panel-git-commit){
+ animation:mo-fold-in var(--base,240ms) var(--ease,ease) both
+}
+@keyframes mo-fold-out{to{opacity:0;transform:translateY(-5px) scale(.94)}}
+@keyframes mo-fold-in{from{opacity:0;transform:translateY(5px) scale(.94)}to{opacity:1;transform:none}}
+
+html[data-panel-transition="git-send"] .remote-line{view-transition-name:panel-git-remote}
+html[data-panel-transition="git-send"]::view-transition-group(panel-git-remote){
+ animation-duration:320ms;animation-timing-function:var(--ease,ease)
+}
+
+html[data-panel-transition^="tab-"] .main-panes>.pane:not([hidden]){
+ view-transition-name:panel-project-tab
+}
+html[data-panel-transition^="tab-"]::view-transition-group(panel-project-tab){
+ animation-duration:var(--base,240ms);animation-timing-function:var(--ease,ease)
+}
+html[data-panel-transition="tab-forward"]::view-transition-old(panel-project-tab){
+ animation:mo-tab-forward-out var(--base,240ms) var(--ease,ease) both
+}
+html[data-panel-transition="tab-forward"]::view-transition-new(panel-project-tab){
+ animation:mo-tab-forward-in var(--base,240ms) var(--ease,ease) both
+}
+html[data-panel-transition="tab-backward"]::view-transition-old(panel-project-tab){
+ animation:mo-tab-backward-out var(--base,240ms) var(--ease,ease) both
+}
+html[data-panel-transition="tab-backward"]::view-transition-new(panel-project-tab){
+ animation:mo-tab-backward-in var(--base,240ms) var(--ease,ease) both
+}
+@keyframes mo-tab-forward-out{to{opacity:0;transform:translateX(-12px)}}
+@keyframes mo-tab-forward-in{from{opacity:0;transform:translateX(12px)}to{opacity:1;transform:none}}
+@keyframes mo-tab-backward-out{to{opacity:0;transform:translateX(12px)}}
+@keyframes mo-tab-backward-in{from{opacity:0;transform:translateX(-12px)}to{opacity:1;transform:none}}
+
+/* One reduced-motion floor for every class-form consumer. Selector-form callers (elements that say
+   `animation:mo-*` in their own rule without a mo-* class) keep their own reduce rule — see each
+   surface's stylesheet. */
+@media(prefers-reduced-motion:reduce){
+ [class*="mo-"]{animation:none!important}
+ .mo-pop,.mo-rise{opacity:1!important;transform:none!important}
+ ::view-transition-group(*),::view-transition-old(*),::view-transition-new(*){animation:none!important}
+}

@@ -1,0 +1,182 @@
+/* Full-screen project terminals: launch controls above the session deck. */
+
+.pt-root {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 8px 12px;
+  background: var(--bg-raised);
+  border-bottom: 1px solid var(--line);
+}
+
+.pt-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  flex-wrap: wrap;
+}
+
+.pt-row[hidden] { display: none; }
+
+/* The row's name. Tiny, faint, fixed width — it labels without competing. */
+.pt-key {
+  width: 34px;
+  flex: 0 0 34px;
+  font-size: var(--text-xs);
+  letter-spacing: 0.1em;
+  color: var(--ink-faint);
+}
+
+/* ------------------------------------------------------------------ run */
+
+.pt-go {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 12px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--on-accent);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity var(--fast) var(--ease);
+}
+.pt-go svg { width: 13px; height: 13px; }
+.pt-go:hover { opacity: 0.88; }
+.pt-go:disabled { opacity: 0.45; cursor: default; }
+.pt-go.is-stop { background: var(--risk); }
+
+.pt-state {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  padding-left: 4px;
+  font-size: var(--text-sm);
+  color: var(--ink-dim);
+}
+.pt-state i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  align-self: center;
+  color: var(--ink-faint);
+}
+.pt-state b { font-weight: 600; color: var(--ink); }
+.pt-state small { color: var(--ink-faint); font-size: var(--text-xs); }
+
+.pt-state.t-ok i, .pt-state.t-ok b { color: var(--ok); }
+.pt-state.t-live i, .pt-state.t-live b { color: var(--accent); }
+.pt-state.t-warn i, .pt-state.t-warn b { color: var(--warn); }
+.pt-state.t-risk i, .pt-state.t-risk b { color: var(--risk); }
+
+.pt-verb {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink-dim);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: color var(--fast) var(--ease), border-color var(--fast) var(--ease);
+}
+.pt-verb svg { width: 12px; height: 12px; }
+.pt-verb:hover { color: var(--ink); border-color: var(--ink-faint); }
+.pt-verb[hidden] { display: none; }
+.pt-verb.is-active { color: var(--ink); border-color: var(--accent); }
+
+/* "All runs" is a door out, not a verb on this project — it sits at the end and stays quiet. */
+.pt-runs { margin-left: auto; color: var(--ink-faint); }
+
+/* --------------------------------------------------------------- sessions */
+
+.pt-engine {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink-dim);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: pointer;
+  transition: color var(--fast) var(--ease), border-color var(--fast) var(--ease);
+}
+.pt-engine svg { width: 12px; height: 12px; }
+.pt-engine:hover { color: var(--ink); }
+.pt-engine small {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--ink-faint);
+}
+
+/* Each engine wears its own hue on the glyph, the same one the strip and the wall use. */
+.pt-engine.is-claude svg { color: var(--k-claude); }
+.pt-engine.is-codex svg { color: var(--k-codex); }
+.pt-engine.is-grok svg { color: var(--k-grok); }
+.pt-engine.is-dshline svg { color: var(--k-dshline); }
+.pt-engine.is-kimi svg { color: var(--k-kimi); }
+.pt-engine.is-glm svg { color: var(--k-glm); }
+.pt-engine.is-opencode svg { color: var(--k-opencode); }
+.pt-engine.is-opencode-kimi-k3 svg { color: var(--k-opencode); }
+.pt-engine.is-opencode-deepseek-v4-flash svg { color: var(--k-opencode); }
+.pt-engine.is-shell svg { color: var(--k-shell); }
+.pt-engine:hover { border-color: currentColor; }
+
+.pt-count {
+  margin-left: auto;
+  font-size: var(--text-xs);
+  color: var(--ink-faint);
+}
+
+/* --------------------------------------------------------- notices / log */
+
+.pt-capacity {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-left: 2px solid var(--warn);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  color: var(--ink-dim);
+}
+.pt-capacity[hidden] { display: none; }
+
+.pt-notice {
+  margin: 6px 0 0;
+  font-size: var(--text-sm);
+  color: var(--ink-dim);
+}
+.pt-notice.is-error { color: var(--risk); }
+.pt-notice[hidden] { display: none; }
+
+/* The build's own words. Capped: this pane is the lid on the terminal, not a second one. */
+.pt-log {
+  margin: 8px 0 0;
+  max-height: 150px;
+  overflow: auto;
+  padding: 8px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+  color: var(--ink-dim);
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: var(--text-xs);
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.pt-log[hidden] { display: none; }

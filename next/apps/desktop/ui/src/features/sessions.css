@@ -1,0 +1,154 @@
+/**
+ * The session strip sits directly above the terminal it controls. Its flush segments are places
+ * you can be, and the active one dissolves into the screen below.
+ *
+ * Kind carries colour: a Claude session is the app accent, a shell is cyan. You should never
+ * have to read the label to know which of the two you are typing into.
+ */
+
+.sessionstrip {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  min-height: 34px;
+  padding-right: 10px;
+  background: var(--bg-sunken);
+  border-top: 1px solid var(--line-soft);
+  border-bottom: 1px solid var(--line-soft);
+}
+
+.sess-tabs {
+  display: flex;
+  align-items: stretch;
+  flex: 1;
+  min-width: 0;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.sess-tabs::-webkit-scrollbar { display: none; }
+
+.sess-tab {
+  --k: var(--accent);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 9px 0 11px;
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: inset -1px 0 0 var(--line-soft);
+  border-top: 2px solid transparent;
+  color: var(--ink-dim);
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: var(--text-sm);
+  transition: color var(--fast) var(--ease), background var(--fast) var(--ease);
+}
+.sess-tab:hover { color: var(--ink); background: color-mix(in oklab, var(--k) 9%, transparent); }
+
+.k-claude   { --k: var(--k-claude); }
+.k-codex    { --k: var(--k-codex); }
+.k-grok     { --k: var(--k-grok); }
+.k-dshline  { --k: var(--k-dshline); }
+.k-kimi     { --k: var(--k-kimi); }
+.k-glm      { --k: var(--k-glm); }
+.k-opencode { --k: var(--k-opencode); }
+.k-opencode-kimi-k3 { --k: var(--k-opencode); }
+.k-opencode-deepseek-v4-flash { --k: var(--k-opencode); }
+.k-shell    { --k: var(--k-shell); }
+
+.sess-tab.is-active {
+  color: var(--ink);
+  border-top-color: var(--k);
+  /* Dissolves into the terminal underneath — same surface, no seam. */
+  background: linear-gradient(
+    to bottom,
+    color-mix(in oklab, var(--k) 16%, transparent),
+    var(--bg-sunken) 90%
+  );
+}
+
+/* Alive, and which kind. A dead session keeps its transcript but stops claiming to be running. */
+.sess-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--k);
+  box-shadow: 0 0 6px color-mix(in oklab, var(--k) 60%, transparent);
+}
+.sess-tab.is-dead { opacity: 0.55; }
+.sess-tab.is-dead .sess-dot {
+  background: transparent;
+  border: 1px solid var(--ink-faint);
+  box-shadow: none;
+}
+.sess-tab.is-dead .sess-name { text-decoration: line-through; }
+.sess-ended { font-size: var(--text-xs); font-style: italic; color: var(--ink-faint); }
+
+.sess-x {
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  padding: 0 3px;
+  font-size: var(--text-md);
+  line-height: 1;
+  color: var(--ink-faint);
+}
+.sess-x:hover { transform: none; color: var(--risk); background: color-mix(in oklab, var(--risk) 14%, transparent); }
+
+/* ------------------------------------------------------------- open another */
+
+.sess-new { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; flex: none; }
+.sess-add {
+  background: transparent;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 4px 9px;
+  font-size: var(--text-xs);
+  font-weight: 550;
+  color: var(--ink-dim);
+  transition: color var(--fast) var(--ease), border-color var(--fast) var(--ease),
+    background var(--fast) var(--ease);
+}
+.sess-add:hover { transform: none; color: var(--ink); }
+.sess-add small {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  color: var(--ink-faint);
+}
+.s-claude:hover {
+  border-color: color-mix(in oklab, var(--k-claude) 55%, transparent);
+  background: color-mix(in oklab, var(--k-claude) 14%, transparent);
+}
+.s-codex:hover {
+  border-color: color-mix(in oklab, var(--k-codex) 55%, transparent);
+  background: color-mix(in oklab, var(--k-codex) 14%, transparent);
+}
+.s-grok:hover {
+  border-color: color-mix(in oklab, var(--k-grok) 55%, transparent);
+  background: color-mix(in oklab, var(--k-grok) 14%, transparent);
+}
+.s-kimi:hover {
+  border-color: color-mix(in oklab, var(--k-kimi) 55%, transparent);
+  background: color-mix(in oklab, var(--k-kimi) 14%, transparent);
+}
+.s-glm:hover {
+  border-color: color-mix(in oklab, var(--k-glm) 55%, transparent);
+  background: color-mix(in oklab, var(--k-glm) 14%, transparent);
+}
+.s-opencode:hover {
+  border-color: color-mix(in oklab, var(--k-opencode) 55%, transparent);
+  background: color-mix(in oklab, var(--k-opencode) 14%, transparent);
+}
+.s-opencode-kimi-k3:hover {
+  border-color: color-mix(in oklab, var(--k-opencode) 55%, transparent);
+  background: color-mix(in oklab, var(--k-opencode) 14%, transparent);
+}
+.s-opencode-deepseek-v4-flash:hover {
+  border-color: color-mix(in oklab, var(--k-opencode) 55%, transparent);
+  background: color-mix(in oklab, var(--k-opencode) 14%, transparent);
+}
+.s-shell:hover {
+  border-color: color-mix(in oklab, var(--k-shell) 55%, transparent);
+  background: color-mix(in oklab, var(--k-shell) 14%, transparent);
+}

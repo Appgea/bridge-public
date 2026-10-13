@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://appgea.dev/panel/ui.schema.json",
+  "title": "Panel visual request",
+  "type": "object",
+  "required": ["view", "payload"],
+  "properties": {
+    "view": {
+      "enum": ["card", "progress", "files", "diff", "decision", "git_review"]
+    },
+    "title": { "type": "string", "maxLength": 120 },
+    "payload": { "type": "object" }
+  },
+  "additionalProperties": false
+}

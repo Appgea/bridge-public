@@ -1,0 +1,23 @@
+[package]
+name = "appgea-panel-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+panel-core = { path = "../../../crates/panel-core" }
+panel-ingress = { path = "../../../crates/panel-ingress" }
+panel-store = { path = "../../../crates/panel-store" }
+panel-terminal = { path = "../../../crates/panel-terminal" }
+base64 = "0.22"
+serde.workspace = true
+serde_json.workspace = true
+tauri.workspace = true
+uuid.workspace = true
+tauri-plugin-dialog = "2"
+notify = "8"
+toml = "0.9"
+tauri-plugin-notification = "2"

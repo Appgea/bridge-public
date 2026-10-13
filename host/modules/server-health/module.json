@@ -1,0 +1,16 @@
+{
+  "name": "server-health",
+  "title": "Servers",
+  "visibility": "public",
+  "summary": "A health check for the servers you run. Portfolio-wide, not per project.",
+  "icon": "🩺",
+  "protocol": "cgi-argv",
+  "buildInputs": [],
+  "exec": "bin/host.py",
+  "args": [],
+  "assets": "assets",
+  "agentDoc": "AGENT.md",
+  "requires": [
+    "python3"
+  ]
+}

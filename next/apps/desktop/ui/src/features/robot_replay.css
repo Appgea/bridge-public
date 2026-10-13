@@ -1,0 +1,288 @@
+/*
+ * The replay theater. Deliberately a dark room in both app themes — a performance reads better
+ * with the lights off, and the add/del colors stay constant. Everything animates with cheap
+ * transforms and opacity; the typing itself is textContent mutation, not CSS.
+ */
+
+.files-root { position: relative; }
+
+.rr-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: stretch;
+  background: rgba(10, 12, 18, 0.55);
+  backdrop-filter: blur(3px);
+  animation: rr-fade 0.18s ease-out;
+}
+
+@keyframes rr-fade { from { opacity: 0; } }
+
+.rr-stage {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  margin: 18px;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #14161d;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+  outline: none;
+}
+
+/* ------------------------------------------------------------------ header */
+
+.rr-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  background: #191c25;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.rr-meta { min-width: 0; flex: 1; display: grid; }
+.rr-meta b { color: #f2f4f8; font-size: var(--text-md); }
+.rr-meta small {
+  color: #8d93a3;
+  font-size: var(--text-xs);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rr-controls { display: flex; align-items: center; gap: 6px; }
+.rr-controls button {
+  appearance: none;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background: rgba(255, 255, 255, 0.05);
+  color: #cfd4de;
+  border-radius: 7px;
+  font: inherit;
+  font-size: var(--text-xs);
+  padding: 4px 9px;
+  cursor: pointer;
+}
+.rr-controls button:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
+.rr-controls .rr-close { font-size: var(--text-lg); line-height: 1; padding: 3px 9px; }
+
+/* ------------------------------------------------------------------- robot */
+
+.rr-bot { width: 46px; height: 46px; display: grid; place-items: center; }
+
+.rr-bot-body {
+  position: relative;
+  width: 34px;
+  height: 28px;
+  border-radius: 9px;
+  background: linear-gradient(180deg, #4b5568, #343c4c);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  display: block;
+  animation: rr-hover 2.6s ease-in-out infinite;
+}
+
+@keyframes rr-hover { 50% { transform: translateY(-2px); } }
+
+.rr-antenna {
+  position: absolute;
+  top: -7px;
+  left: 50%;
+  width: 2px;
+  height: 6px;
+  background: #6d7789;
+}
+.rr-antenna::after {
+  content: "";
+  position: absolute;
+  top: -4px;
+  left: -2px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #ffd166;
+  animation: rr-blinklamp 1.4s ease-in-out infinite;
+}
+@keyframes rr-blinklamp { 50% { opacity: 0.35; } }
+
+.rr-eye {
+  position: absolute;
+  top: 9px;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #9fd8ff;
+  box-shadow: 0 0 6px rgba(120, 200, 255, 0.8);
+  animation: rr-blink 4.2s infinite;
+}
+.rr-eye.e-one { left: 6px; }
+.rr-eye.e-two { right: 6px; animation-delay: 0.12s; }
+@keyframes rr-blink { 0%, 92%, 100% { transform: scaleY(1); } 95% { transform: scaleY(0.1); } }
+
+.rr-mouth {
+  position: absolute;
+  bottom: 5px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 10px;
+  height: 2px;
+  border-radius: 2px;
+  background: #8d93a3;
+}
+
+.rr-arm {
+  position: absolute;
+  bottom: -4px;
+  width: 3px;
+  height: 9px;
+  border-radius: 2px;
+  background: #6d7789;
+  transform-origin: top center;
+}
+.rr-arm.a-one { left: 5px; }
+.rr-arm.a-two { right: 5px; }
+
+/* Typing: the arms hammer alternately. */
+.rr-bot.is-typing .rr-arm.a-one { animation: rr-hammer 0.16s linear infinite; }
+.rr-bot.is-typing .rr-arm.a-two { animation: rr-hammer 0.16s linear infinite 0.08s; }
+@keyframes rr-hammer { 50% { transform: rotate(24deg) translateY(2px); } }
+
+/* Scanning: eyes sweep. */
+.rr-bot.is-scanning .rr-eye { animation: rr-sweep 0.5s ease-in-out infinite alternate; }
+@keyframes rr-sweep { from { transform: translateX(-2px); } to { transform: translateX(2px); } }
+
+.rr-bot.is-paused .rr-bot-body { animation-play-state: paused; opacity: 0.7; }
+
+.rr-bot.is-bowing .rr-bot-body { animation: rr-bow 0.8s ease-in-out; }
+@keyframes rr-bow { 40% { transform: translateY(3px) rotate(6deg); } }
+
+/* -------------------------------------------------------------------- code */
+
+.rr-code {
+  overflow: auto;
+  padding: 12px 0 24px;
+  font-family: "SF Mono", "SFMono-Regular", Menlo, Monaco, ui-monospace, monospace;
+  font-size: var(--text-sm);
+  line-height: 1.6;
+  background: #14161d;
+}
+
+.rr-line {
+  display: grid;
+  grid-template-columns: 48px 16px minmax(0, 1fr);
+  align-items: baseline;
+  white-space: pre;
+}
+.rr-line i { text-align: right; padding-right: 10px; color: #565d6e; font-style: normal; user-select: none; }
+.rr-line b { color: #8d93a3; font-weight: 600; }
+.rr-line code { color: #e8eaf0; overflow: hidden; text-overflow: ellipsis; }
+
+.rr-line.is-same code { color: #9aa1b1; }
+.rr-line.is-gap { color: #565d6e; padding: 2px 0 2px 64px; font-size: var(--text-xs); }
+
+.rr-line.is-del { background: rgba(255, 92, 92, 0.10); }
+.rr-line.is-del code { color: #ff9d9d; }
+.rr-line.is-del b { color: #ff7a7a; }
+.rr-line.is-del.is-going code { text-decoration: line-through; opacity: 0.6; transition: opacity 0.35s ease; }
+.rr-line.is-del.is-gone {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition: max-height 0.25s ease, opacity 0.2s ease;
+}
+.rr-line.is-del { max-height: 28px; }
+
+.rr-line.is-add { background: rgba(80, 220, 130, 0.08); animation: rr-landed 0.3s ease-out; }
+.rr-line.is-add code { color: #a7ecc0; }
+.rr-line.is-add b { color: #62d68b; }
+@keyframes rr-landed { from { background: rgba(80, 220, 130, 0.25); } }
+
+/* A true line revision stays on one row. Only the changed fragment leaves and returns, so the
+   eye never has to reconcile a red line with a second green copy of almost the same sentence. */
+.rr-line.is-edit {
+  background: rgba(159, 216, 255, 0.035);
+  transition: background 0.24s ease;
+}
+.rr-line.is-edit b { color: #84c7f4; }
+.rr-line.is-edit.is-focus { background: rgba(159, 216, 255, 0.075); }
+.rr-inline-old,
+.rr-inline-new {
+  display: inline-block;
+  overflow: hidden;
+  vertical-align: bottom;
+  white-space: pre;
+}
+.rr-inline-old {
+  box-sizing: content-box;
+  border-radius: 3px;
+  color: inherit;
+  opacity: 1;
+  transition:
+    width 0.23s cubic-bezier(0.4, 0, 0.2, 1),
+    opacity 0.18s ease,
+    color 0.18s ease,
+    background 0.18s ease;
+}
+.rr-inline-old.is-marked { background: rgba(255, 92, 92, 0.16); color: #ffb0b0; }
+.rr-inline-old.is-cut { color: #ff8f8f; text-decoration: line-through; opacity: 0.62; }
+.rr-inline-old.is-gone { width: 0 !important; opacity: 0; }
+.rr-inline-new { color: #a7ecc0; }
+.rr-line.is-edit.is-settled { animation: rr-inline-settled 0.55s ease-out; }
+@keyframes rr-inline-settled {
+  from { background: rgba(80, 220, 130, 0.19); }
+  to { background: rgba(159, 216, 255, 0.035); }
+}
+
+/* The caret rides the end of the line being typed. */
+.rr-line.is-caret code::after,
+.rr-inline-new.is-caret::after {
+  content: "";
+  display: inline-block;
+  width: 7px;
+  height: 13px;
+  margin-left: 1px;
+  vertical-align: text-bottom;
+  background: #9fd8ff;
+  animation: rr-caret 0.7s steps(1) infinite;
+}
+@keyframes rr-caret { 50% { opacity: 0; } }
+
+/* ------------------------------------------------------------------ footer */
+
+.rr-foot {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  background: #191c25;
+  border-top: 1px solid rgba(255, 255, 255, 0.07);
+}
+
+.rr-say { color: #8d93a3; font-size: var(--text-xs); flex: 1; font-style: italic; }
+
+.rr-track {
+  width: 180px;
+  height: 4px;
+  border-radius: 2px;
+  background: rgba(255, 255, 255, 0.08);
+  overflow: hidden;
+}
+.rr-track i {
+  display: block;
+  height: 100%;
+  width: 0%;
+  border-radius: 2px;
+  background: linear-gradient(90deg, #62d68b, #9fd8ff);
+  transition: width 0.4s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rr-overlay,
+  .rr-bot-body,
+  .rr-antenna::after,
+  .rr-eye,
+  .rr-arm,
+  .rr-line.is-add,
+  .rr-line.is-edit.is-settled { animation: none !important; }
+  .rr-inline-old { transition: none !important; }
+}

@@ -1,0 +1,818 @@
+/**
+ * Runs — a device-first command center.
+ *
+ * The simulator deck owns live work, capacity decisions, and the queue. Idle projects live in a
+ * visual launcher underneath, so twelve apps no longer read as twelve equally important rows.
+ * Colours remain semantic and token-based: green = alive, amber = capacity, red = failed.
+ */
+
+.run[hidden] { display: none; }
+
+.run {
+  display: block;
+  overflow-y: auto;
+  background:
+    radial-gradient(900px 420px at 50% -160px, var(--accent-soft), transparent 74%),
+    var(--bg);
+}
+
+.run-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 20px 22px 42px;
+}
+.run-inner.is-enter { animation: run-in var(--base) var(--ease) both; }
+@keyframes run-in {
+  from { transform: translateY(6px); opacity: 0; }
+  to   { transform: none; opacity: 1; }
+}
+
+/* -------------------------------------------------------------------- header */
+
+.run-screen-head,
+.run-head-title,
+.run-head-status {
+  display: flex;
+  align-items: center;
+}
+.run-screen-head { justify-content: space-between; gap: 18px; }
+.run-head-title { gap: 11px; min-width: 0; }
+.run-head-status { justify-content: flex-end; gap: 7px; flex-wrap: wrap; }
+
+.run-mark {
+  width: 38px;
+  height: 38px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border-radius: 11px;
+  color: var(--ok);
+  background: color-mix(in oklab, var(--ok) 11%, var(--bg-raised));
+  border: 1px solid color-mix(in oklab, var(--ok) 25%, var(--line-soft));
+}
+.run-mark .ui-icon { width: 16px; height: 16px; }
+
+.run-title-id { min-width: 0; }
+.run-title-id b {
+  display: block;
+  color: var(--ink);
+  font-size: var(--text-xl);
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+.run-title-id small {
+  display: block;
+  margin-top: 2px;
+  color: var(--ink-dim);
+  font-size: var(--text-xs);
+}
+
+.run-count {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  color: var(--ink-dim);
+  background: var(--bg-raised);
+  font-size: var(--text-xs);
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+}
+.run-count i {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--ok);
+}
+.run-queue-count { color: var(--warn); }
+.run-queue-count i { background: var(--warn); }
+.run-queue-count[hidden] { display: none; }
+
+.run-show-simulator {
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--ink-dim);
+  background: transparent;
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+.run-show-simulator:hover {
+  transform: none;
+  color: var(--ink);
+  border-color: color-mix(in oklab, var(--accent) 42%, var(--line));
+  background: color-mix(in oklab, var(--accent) 9%, transparent);
+}
+
+/* ------------------------------------------------------------------ sections */
+
+.run-section {
+  overflow: hidden;
+  border: 1px solid var(--line-soft);
+  border-radius: 14px;
+  background: color-mix(in oklab, var(--bg-raised) 74%, var(--bg));
+}
+
+.run-section-head {
+  min-height: 54px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 11px 14px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.run-section-head > span > small,
+.run-section-head > span > b { display: block; }
+.run-section-head > span > small {
+  margin-bottom: 2px;
+  color: var(--ink-faint);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+.run-section-head > span > b {
+  color: var(--ink);
+  font-size: var(--text-md);
+  font-weight: 650;
+}
+.run-section-head > p {
+  max-width: 44ch;
+  margin: 0;
+  color: var(--ink-faint);
+  font-size: var(--text-xs);
+  line-height: 1.35;
+  text-align: right;
+}
+
+/* ------------------------------------------------------------ simulator deck */
+
+.run-deck {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  padding: 12px;
+}
+
+.run-live-card {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 13px;
+  border: 1px solid color-mix(in oklab, var(--ok) 26%, var(--line-soft));
+  border-radius: 11px;
+  background:
+    radial-gradient(420px 180px at 100% 0%, color-mix(in oklab, var(--ok) 7%, transparent), transparent 72%),
+    var(--bg-raised);
+  box-shadow: 0 14px 34px color-mix(in oklab, var(--bg-sunken) 58%, transparent);
+}
+.run-live-card.is-error {
+  border-color: color-mix(in oklab, var(--risk) 36%, var(--line-soft));
+  background:
+    radial-gradient(420px 180px at 100% 0%, color-mix(in oklab, var(--risk) 8%, transparent), transparent 72%),
+    var(--bg-raised);
+}
+.run-live-card.is-busy,
+.run-app-tile.is-busy,
+.run-attention.is-busy { opacity: 0.62; pointer-events: none; }
+
+.run-live-device {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--ink-dim);
+}
+.run-live-device > b {
+  overflow: hidden;
+  color: var(--ink-dim);
+  font-size: var(--text-xs);
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.run-live-device > small {
+  overflow: hidden;
+  flex: 1;
+  color: var(--ink-faint);
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.run-device-dot {
+  width: 7px;
+  height: 7px;
+  flex: none;
+  border-radius: 50%;
+  background: var(--ok);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--ok) 10%, transparent);
+}
+.is-error .run-device-dot {
+  background: var(--risk);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--risk) 10%, transparent);
+}
+
+.run-live-identity,
+.run-app-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.run-live-copy,
+.run-app-copy,
+.run-attention-text { min-width: 0; flex: 1; }
+.run-live-copy > b,
+.run-live-copy > small,
+.run-app-copy > b,
+.run-app-copy > small,
+.run-attention-text > b,
+.run-attention-text > small { display: block; }
+.run-live-copy > b {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: var(--text-xl);
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.run-live-copy > small {
+  margin-top: 2px;
+  color: var(--ink-dim);
+  font-size: var(--text-xs);
+}
+
+.run-ico {
+  position: relative;
+  width: 42px;
+  height: 42px;
+  flex: none;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  border: 1px solid color-mix(in oklab, var(--accent) 26%, var(--line-soft));
+  border-radius: 11px;
+  color: var(--ink);
+  background: color-mix(in oklab, var(--accent) 12%, var(--bg-raised));
+  font-size: var(--text-lg);
+  font-weight: 650;
+}
+.run-ico img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* One quiet line that reads left-to-right: build, install, alive. */
+.run-progress {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  align-items: start;
+}
+.run-progress-step {
+  position: relative;
+  display: grid;
+  justify-items: center;
+  gap: 5px;
+  color: var(--ink-faint);
+  font-size: var(--text-xs);
+}
+.run-progress-step::before {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  top: 4px;
+  right: 50%;
+  width: 100%;
+  height: 1px;
+  background: var(--line);
+}
+.run-progress-step:first-child::before { display: none; }
+.run-progress-step i {
+  position: relative;
+  z-index: 1;
+  width: 9px;
+  height: 9px;
+  border: 2px solid var(--line);
+  border-radius: 50%;
+  background: var(--bg-raised);
+}
+.run-progress-step.is-done { color: var(--ok); }
+.run-progress-step.is-done::before { background: color-mix(in oklab, var(--ok) 58%, var(--line)); }
+.run-progress-step.is-done i { border-color: var(--ok); background: var(--ok); }
+.run-progress-step.is-current { color: var(--accent); }
+.run-progress-step.is-current i {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 12%, transparent);
+}
+.run-live-card.is-error .run-progress-step.is-current { color: var(--risk); }
+.run-live-card.is-error .run-progress-step.is-current i {
+  border-color: var(--risk);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--risk) 12%, transparent);
+}
+
+.run-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  padding: 3px 7px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: var(--ink-dim);
+  background: var(--bg-sunken);
+  font-size: var(--text-xs);
+  font-weight: 650;
+  text-transform: capitalize;
+}
+.run-pill i {
+  width: 5px;
+  height: 5px;
+  flex: none;
+  border-radius: 50%;
+  background: currentColor;
+}
+.run-pill.t-ok {
+  color: var(--ok);
+  border-color: color-mix(in oklab, var(--ok) 24%, transparent);
+  background: color-mix(in oklab, var(--ok) 10%, transparent);
+}
+.run-pill.t-live {
+  color: var(--accent);
+  border-color: color-mix(in oklab, var(--accent) 28%, transparent);
+  background: color-mix(in oklab, var(--accent) 11%, transparent);
+}
+.run-pill.t-risk {
+  color: var(--risk);
+  border-color: color-mix(in oklab, var(--risk) 28%, transparent);
+  background: color-mix(in oklab, var(--risk) 11%, transparent);
+}
+.run-pill.t-live i { animation: run-live 1.2s var(--ease) infinite; }
+@keyframes run-live {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.45); opacity: 0.55; }
+}
+
+.run-live-controls,
+.run-attention-actions,
+.run-app-launch {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.run-live-controls { margin-top: auto; }
+.run-live-controls .run-target-choice,
+.run-attention-actions .run-target-choice {
+  width: min(210px, 28vw);
+  flex: 0 1 210px;
+}
+
+.run-live-controls button,
+.run-attention-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 5px 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  color: var(--ink-dim);
+  background: transparent;
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+.run-live-controls button:hover,
+.run-attention-actions button:hover {
+  transform: none;
+  color: var(--ink);
+  border-color: color-mix(in oklab, var(--accent) 44%, var(--line));
+  background: color-mix(in oklab, var(--accent) 9%, transparent);
+}
+.run-live-controls .ui-icon,
+.run-attention-actions .ui-icon { width: 11px; height: 11px; }
+.run-live-controls .run-stop { margin-left: auto; }
+.run-live-controls .run-stop:hover {
+  color: var(--risk);
+  border-color: color-mix(in oklab, var(--risk) 44%, var(--line));
+  background: color-mix(in oklab, var(--risk) 9%, transparent);
+}
+/* A second instance is a real cost, so its control is quiet until you go looking for it. */
+.run-live-controls .run-another { opacity: 0.5; }
+.run-live-controls .run-another:hover { opacity: 1; }
+
+/* An extra instance is visibly a copy: same app, its own device, dimmer frame. */
+.run-live-card.is-extra {
+  border-style: dashed;
+  border-color: color-mix(in oklab, var(--ok) 18%, var(--line-soft));
+  background: var(--bg-raised);
+  box-shadow: none;
+}
+
+.run-logbtn.is-active {
+  color: var(--accent);
+  border-color: color-mix(in oklab, var(--accent) 44%, var(--line));
+  background: color-mix(in oklab, var(--accent) 10%, transparent);
+}
+
+.run-log {
+  margin: 0;
+  max-height: 170px;
+  overflow-y: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  color: var(--ink-dim);
+  background: var(--bg-sunken);
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: var(--text-xs);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.run-log[hidden] { display: none; }
+
+/* ------------------------------------------------------------ terminals row
+   The project's open terminals, on the card of the app they belong to. Quiet by default —
+   this is a way back to work in progress, not a second set of run controls. */
+.run-terms {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding-top: 9px;
+  border-top: 1px dashed var(--line-soft);
+}
+.run-terms-key {
+  margin-right: 2px;
+  color: var(--ink-faint);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+.run-term {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: 160px;
+  padding: 3px 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  color: var(--ink-dim);
+  background: var(--bg-raised);
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: color var(--fast) var(--ease), border-color var(--fast) var(--ease);
+}
+.run-term span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.run-term svg { width: 11px; height: 11px; flex: none; }
+.run-term:hover {
+  color: var(--ink);
+  border-color: color-mix(in oklab, var(--accent) 42%, var(--line));
+}
+/* A shell is plumbing; an agent is somebody working. Only the second is worth a colour. */
+.run-term:not(.is-shell):not(.is-dead) svg { color: var(--accent); }
+.run-term.is-dead {
+  color: var(--ink-faint);
+  border-style: dashed;
+}
+.run-term.is-dead span { text-decoration: line-through; }
+
+/* Queued, capacity-blocked, and failed starts live between the active deck and the launcher. */
+.run-attention {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding: 10px 11px;
+  border: 1px solid color-mix(in oklab, var(--warn) 32%, var(--line-soft));
+  border-radius: 10px;
+  background: color-mix(in oklab, var(--warn) 7%, var(--bg-raised));
+}
+.run-attention-error {
+  border-color: color-mix(in oklab, var(--risk) 34%, var(--line-soft));
+  background: color-mix(in oklab, var(--risk) 7%, var(--bg-raised));
+}
+.run-attention-copy {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.run-attention .run-ico {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+}
+.run-attention-text > b {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: var(--text-sm);
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.run-attention-text > small {
+  overflow: hidden;
+  margin-top: 1px;
+  color: var(--ink-dim);
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.run-attention-actions .run-queue,
+.run-attention-actions .run-extra { color: var(--warn); border-color: color-mix(in oklab, var(--warn) 38%, var(--line)); }
+.run-attention-actions .run-retry { color: var(--risk); border-color: color-mix(in oklab, var(--risk) 38%, var(--line)); }
+.run-attention > .run-log { flex-basis: 100%; }
+
+.run-deck-empty {
+  grid-column: 1 / -1;
+  min-height: 92px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 20px;
+  color: var(--ink-dim);
+  background: color-mix(in oklab, var(--bg-sunken) 38%, transparent);
+}
+.run-deck-empty-mark {
+  width: 36px;
+  height: 36px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  border: 1px dashed color-mix(in oklab, var(--ok) 38%, var(--line));
+  border-radius: 10px;
+  color: var(--ok);
+}
+.run-deck-empty-mark .ui-icon { width: 14px; height: 14px; }
+.run-deck-empty b,
+.run-deck-empty small { display: block; }
+.run-deck-empty b { color: var(--ink); font-size: var(--text-sm); }
+.run-deck-empty small { max-width: 62ch; margin-top: 3px; color: var(--ink-faint); font-size: var(--text-xs); line-height: 1.4; }
+
+/* --------------------------------------------------------------- app launcher */
+
+.run-launch-head { align-items: flex-end; }
+.run-launch-tools {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.run-search {
+  width: min(230px, 38vw);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 9px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  color: var(--ink-faint);
+  background: var(--bg);
+}
+.run-search:focus-within { border-color: color-mix(in oklab, var(--accent) 48%, var(--line)); }
+.run-search input {
+  width: 100%;
+  padding: 0;
+  border: 0;
+  outline: 0;
+  color: var(--ink);
+  background: transparent;
+  font: inherit;
+  font-size: var(--text-xs);
+}
+.run-search input::placeholder { color: var(--ink-faint); }
+/* The keys this screen answers to, where the typing happens. Fades out once there is a query —
+   by then the human has already learned it. */
+.run-search-hint {
+  flex: none;
+  color: var(--ink-faint);
+  font-size: var(--text-xs);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  opacity: 0.75;
+  transition: opacity var(--fast) var(--ease);
+}
+.run-search:focus-within .run-search-hint { opacity: 0.4; }
+.run-filters {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--line-soft);
+  border-radius: 8px;
+  background: var(--bg);
+}
+.run-filter {
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--ink-faint);
+  background: transparent;
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+.run-filter:hover { transform: none; color: var(--ink); }
+.run-filter[aria-pressed="true"] {
+  color: var(--accent);
+  background: color-mix(in oklab, var(--accent) 13%, var(--bg-raised));
+}
+
+.run-launcher {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 8px;
+  padding: 12px;
+}
+.run-app-tile {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 11px;
+  padding: 10px;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  background: var(--bg-raised);
+  transition: transform var(--fast) var(--ease), border-color var(--fast) var(--ease);
+}
+.run-app-tile:hover {
+  transform: translateY(-1px);
+  border-color: color-mix(in oklab, var(--accent) 38%, var(--line));
+}
+.run-app-tile[hidden] { display: none; }
+/* Where ↵ will land. Louder than hover on purpose: hover follows the mouse, this follows the
+   keyboard, and it is the only thing telling you which app a return key is about to build. */
+.run-app-tile.is-cursor {
+  border-color: color-mix(in oklab, var(--accent) 62%, var(--line));
+  background: color-mix(in oklab, var(--accent) 8%, var(--bg-raised));
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent) 34%, transparent);
+}
+.run-app-tile .run-ico {
+  width: 36px;
+  height: 36px;
+  border-radius: 9px;
+}
+.run-app-copy > b {
+  overflow: hidden;
+  color: var(--ink);
+  font-size: var(--text-sm);
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.run-app-copy > small {
+  margin-top: 2px;
+  color: var(--ink-faint);
+  font-size: var(--text-xs);
+}
+.run-app-launch { margin-top: auto; }
+
+.run-device {
+  min-width: 0;
+  flex: 1;
+  height: 28px;
+  padding: 0 7px;
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  outline: 0;
+  color: var(--ink-dim);
+  background: var(--bg);
+  font: inherit;
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+.run-device:hover,
+.run-device:focus-visible {
+  color: var(--ink);
+  border-color: color-mix(in oklab, var(--accent) 42%, var(--line));
+}
+
+.run-inline-picker {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+.run-inline-picker .run-device { width: 260px; max-width: 100%; }
+.run-refresh-devices {
+  height: 28px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex: none;
+  padding: 0 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: 7px;
+  color: var(--ink-dim);
+  background: var(--bg);
+  font: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+}
+.run-refresh-devices svg { width: 12px; height: 12px; }
+.run-refresh-devices:disabled { opacity: 0.5; cursor: wait; }
+
+.run-app-launch .run-go {
+  width: 30px;
+  height: 28px;
+  flex: none;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid color-mix(in oklab, var(--ok) 42%, var(--line));
+  border-radius: 7px;
+  color: var(--ok);
+  background: color-mix(in oklab, var(--ok) 7%, transparent);
+}
+.run-app-launch .run-go span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+.run-app-launch .run-go .ui-icon { width: 12px; height: 12px; }
+.run-app-launch .run-go:hover {
+  transform: none;
+  color: var(--on-accent);
+  background: var(--ok);
+}
+
+.run-none,
+.run-launch-none {
+  grid-column: 1 / -1;
+  padding: 28px 18px;
+  color: var(--ink-dim);
+  text-align: center;
+  font-size: var(--text-xs);
+}
+.run-launch-none[hidden] { display: none; }
+
+@media (max-width: 900px) {
+  .run-deck { grid-template-columns: 1fr; }
+  .run-launch-head { align-items: flex-start; flex-direction: column; }
+  .run-launch-tools { width: 100%; justify-content: space-between; }
+  .run-search { width: min(280px, 50vw); }
+}
+
+@media (max-width: 640px) {
+  .run-inner { padding: 14px 12px 30px; }
+  .run-screen-head { align-items: flex-start; flex-direction: column; }
+  .run-head-status { width: 100%; justify-content: flex-start; }
+  .run-section-head > p { display: none; }
+  .run-launch-tools { align-items: stretch; flex-direction: column; }
+  .run-search { width: 100%; }
+  .run-filters { align-self: flex-start; }
+  .run-attention { align-items: stretch; flex-direction: column; }
+  .run-attention-actions { justify-content: flex-end; }
+  .run-live-controls { flex-wrap: wrap; }
+  .run-live-controls .run-stop { margin-left: 0; }
+  .run-live-controls .run-target-choice,
+  .run-attention-actions .run-target-choice {
+    width: 100%;
+    flex-basis: 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .run-inner.is-enter,
+  .run-pill.t-live i { animation: none; }
+}
+
+/* Arrival ring. An Inbox report's "Runs" button lands here pointing at one app; without a mark
+   the screen is a wall of peers and the destination is lost. It fades on its own — an arrival,
+   not a selection you have to clear. */
+.run-live-card.is-spotlit,
+.run-attention.is-spotlit,
+.run-app-tile.is-spotlit {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent) 45%, transparent);
+  animation: run-spotlight 2.8s var(--ease) both;
+}
+@keyframes run-spotlight {
+  0%   { box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent) 65%, transparent); }
+  18%  { box-shadow: 0 0 0 6px color-mix(in oklab, var(--accent) 34%, transparent); }
+  100% { box-shadow: 0 0 0 2px color-mix(in oklab, var(--accent) 0%, transparent); }
+}

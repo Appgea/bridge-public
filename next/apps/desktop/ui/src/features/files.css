@@ -1,0 +1,907 @@
+/**
+ * The Work tab — an Xcode-like workspace.
+ *
+ * Left, the navigator: a filter box over a lazy folder tree. Right, the editor: a tab strip,
+ * one RELATED row under it, the buffer, and a status bar.
+ * All chrome colour comes from the tokens in style.css; the editor surface itself is themed
+ * in TS (Xcode Default Dark / Default Light) and swaps live with the app theme through a
+ * CodeMirror Compartment.
+ *
+ * The pane rebinds `--accent` to `--m-work` at its root, so every accented thing inside it —
+ * chrome AND the TS-side editor theme, which reads the same token — wears the module's blue
+ * instead of the app's purple. Do not hard-code the hue anywhere below.
+ *
+ * Motion: nothing enters. The rail's rows used to stagger in on a shared keyframe; on a surface
+ * you read and type in, that is a cost with no payer. What is left is hover/press feedback and
+ * the line flash that marks where a jump landed — both opacity, both tied to something the human
+ * just did. The navigator resize is direct manipulation — no transition ever runs on its width.
+ */
+
+/* `section.` beats `.pane`'s overflow — this pane scrolls in its parts, not as a whole. */
+section.files-root,
+.files-root {
+  position: relative;
+  display: grid;
+  grid-template-columns: var(--nav-w, 250px) minmax(0, 1fr);
+  overflow: hidden;
+  background: var(--bg);
+
+  /* Every other module wears its own hue — git is green, release is orange — and the rail tab
+     for this one is already `--m-work` blue. The pane inside it was still painting the generic
+     app purple, so Work was the one screen whose chrome disagreed with its own tab. Rebinding
+     `--accent` here re-hues the whole subtree at once: the rail spine, the open-file tint, the
+     tab underline, the jump flash, and CodeMirror's own selection and completion styles, which
+     read the same token from TS. */
+  --accent: var(--m-work);
+  --accent-soft: color-mix(in oklab, var(--m-work) 15%, transparent);
+}
+
+/* `hidden` must always win — several of these elements carry their own display values. */
+.files-root [hidden] { display: none !important; }
+
+.files-root.is-resizing {
+  cursor: col-resize;
+  user-select: none;
+}
+
+/* -------------------------------------------------------------- navigator */
+
+/* Barely off the page — the navigator is air with a hairline edge, not a slab. */
+.nav {
+  position: relative;
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  min-height: 0;
+  min-width: 0;
+  background: color-mix(in oklab, var(--bg-sunken) 45%, var(--bg));
+  border-right: 1px solid var(--line-soft);
+}
+
+/* The drag handle rides the border. Invisible until touched; opacity only. */
+.nav-grip {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: -4px;
+  width: 8px;
+  cursor: col-resize;
+  z-index: 3;
+}
+.nav-grip::after {
+  content: "";
+  position: absolute;
+  inset: 0 3px;
+  border-radius: 1px;
+  background: var(--accent);
+  opacity: 0;
+  transition: opacity var(--fast) var(--ease);
+}
+.nav-grip:hover::after,
+.is-resizing .nav-grip::after { opacity: 0.5; }
+
+/* ---------------------------------------------------------------- filter */
+
+/* The navigator's head is a search box, not a label. */
+.ft-filter { padding: 8px 8px 6px; }
+.ft-filter-input {
+  width: 100%;
+  min-height: 26px;
+  padding: 0 9px;
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm);
+  background: color-mix(in oklab, var(--bg-sunken) 70%, var(--bg));
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--text-sm);
+  outline: none;
+  -webkit-appearance: none;
+  appearance: none;
+}
+.ft-filter-input::placeholder { color: var(--ink-faint); }
+.ft-filter-input:focus { border-color: var(--accent); }
+.ft-filter-input::-webkit-search-cancel-button { -webkit-appearance: none; }
+
+/* A filter hit is a full path. The folder recedes, the name lands. */
+.ft-dir { color: var(--ink-faint); }
+.ft-row.is-open .ft-dir,
+.ft-row:hover .ft-dir { color: var(--ink-dim); }
+.ft-none {
+  margin: 0;
+  padding: 10px 8px;
+  color: var(--ink-faint);
+  font-size: var(--text-xs);
+}
+
+/* ---------------------------------------------------------------- the tree */
+
+.ft {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  min-height: 0;
+}
+
+.ft-tree {
+  overflow-y: auto;
+  overflow-x: hidden;
+  padding: 3px 6px 14px;
+  outline: none;
+}
+.ft-tree:focus-visible {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+  border-radius: var(--radius-sm);
+}
+
+.ft-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  width: 100%;
+  padding: 3px 8px;
+  padding-left: calc(8px + var(--depth, 0) * 14px);
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink-dim);
+  font-size: var(--text-sm);
+  letter-spacing: -0.005em;
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  cursor: pointer;
+}
+.ft-row:hover {
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+  color: var(--ink);
+  transform: none;
+}
+.ft-row:active { transform: none; }
+
+/* Keyboard cursor vs open file: the cursor is a hairline; the open file gets a whisper of
+   tint plus the same accent spine the worklist uses — a marker, not a filled box. */
+.ft-row.is-cursor { outline: 1px solid var(--line); outline-offset: -1px; }
+.ft-row.is-open {
+  background: color-mix(in oklab, var(--accent) 8%, transparent);
+  color: var(--ink);
+}
+.ft-row.is-open::before {
+  content: "";
+  position: absolute;
+  inset: 3px auto 3px 0;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+}
+.ft-row.is-open .ft-name { font-weight: 600; }
+
+.ft-disc {
+  flex: 0 0 auto;
+  width: 11px;
+  font-size: var(--text-xs);
+  line-height: 1;
+  color: var(--ink-faint);
+  text-align: center;
+}
+
+/* File-type glyphs and quick open are shared — see features/editor/editor.css. */
+
+.ft-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* --------------------------------------------------------------- the editor */
+
+.ed {
+  position: relative;
+  display: grid;
+  /* debug bar · tabs · tools · conflict · buffer · find drawer · status */
+  grid-template-rows: auto auto auto auto minmax(0, 1fr) auto auto;
+  overflow: hidden;
+  min-width: 0;
+}
+
+/* Rows are pinned. `hidden` removes items, and auto-placement must not let the surface
+   slide into an `auto` row and collapse — the editor always owns the 1fr row. */
+/* Flat strip: no slab fill, no per-tab boxes — labels on air over one hairline. The active
+   tab is bold ink plus the accent underline, with at most a whisper of tint. */
+.ed-tabs {
+  grid-row: 2;
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  border-bottom: 1px solid var(--line-soft);
+}
+.ed-tabs::-webkit-scrollbar { height: 0; }
+
+.ed-tab {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  min-height: 32px;
+  max-width: 200px;
+  padding: 0 5px 0 10px;
+  color: var(--ink-faint);
+}
+.ed-tab:hover { color: var(--ink-dim); }
+
+/* The tab carries the same glyph the tree does, so a file looks like itself wherever you
+   meet it. Inactive tabs desaturate it — the strip should read as one row of labels until
+   you look for a specific file. */
+.ed-tab .ft-glyph {
+  width: 14px;
+  height: 14px;
+  opacity: 0.6;
+}
+.ed-tab .ft-glyph svg { width: 13px; height: 13px; }
+.ed-tab:hover .ft-glyph,
+.ed-tab.is-active .ft-glyph { opacity: 1; }
+
+/* The active marker. It switches, it does not slide — a strip you click should answer now. */
+.ed-tab::after {
+  content: "";
+  position: absolute;
+  inset: auto 0 0 0;
+  height: 2px;
+  background: var(--accent);
+  transform: scaleX(0);
+}
+.ed-tab.is-active {
+  color: var(--ink);
+  background: color-mix(in oklab, var(--accent-soft) 30%, transparent);
+}
+.ed-tab.is-active::after { transform: scaleX(1); }
+.ed-tab.is-active .ed-tab-label { font-weight: 700; }
+/* A preview slot — the next click from the tree lands here. Italic, as every editor says it. */
+.ed-tab.is-preview .ed-tab-label { font-style: italic; }
+/* The slot number, while ⌘ is held. It takes the glyph's place so the strip does not reflow. */
+.ed-tab-slot { display: none; }
+body.is-cmd-held .ed-tab-slot { display: inline-grid; }
+body.is-cmd-held .ed-tab .ft-glyph { display: none; }
+
+.ed-tab-label {
+  background: transparent;
+  border: 0;
+  padding: 8px 0;
+  color: inherit;
+  font-size: var(--text-sm);
+  letter-spacing: -0.005em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+  transition: none;
+}
+.ed-tab-label:hover { transform: none; }
+
+/* The dirty dot replaces the close glyph until you reach for it. */
+.ed-tab-close {
+  flex: 0 0 auto;
+  width: 17px;
+  height: 17px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink-faint);
+  font-size: var(--text-md);
+  line-height: 1;
+  opacity: 0;
+}
+.ed-tab:hover .ed-tab-close { opacity: 1; }
+.ed-tab-close:hover { color: var(--ink); transform: none; }
+
+.ed-tab.is-dirty .ed-tab-close::before,
+.ed-tab.is-conflict .ed-tab-close::before {
+  content: "";
+  position: absolute;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--warn);
+}
+.ed-tab.is-conflict .ed-tab-close::before { background: var(--risk); }
+.ed-tab:hover .ed-tab-close::before { opacity: 0; }
+.ed-tab.is-dirty .ed-tab-close,
+.ed-tab.is-conflict .ed-tab-close { opacity: 1; }
+.ed-tab.is-dirty:not(:hover) .ed-tab-close,
+.ed-tab.is-conflict:not(:hover) .ed-tab-close { color: transparent; }
+
+/* The agent touched this file: one soft pulse. An overlay fading its OPACITY — the tab's own
+   background never animates, so this costs a composite and not a repaint. */
+.ed-tab::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--accent-soft);
+  opacity: 0;
+  pointer-events: none;
+}
+.ed-tab.is-flash::before { animation: ed-fade-out 900ms var(--ease) forwards; }
+
+/* ------------------------------------------------------------- debug bar */
+
+/*
+ * The controls, where the code is.
+ *
+ * Debugging cost a tab switch per step before this: arm the breakpoint here, leave to press
+ * Start, get thrown back here on the stop, leave again to step over. One strip fixes that. It
+ * is hidden until the project has a debug profile, and it stays a hairline of ink over the
+ * tabs — Work is a reading surface, and a permanent toolbar is a tax on every file you open.
+ */
+.ed-debug {
+  grid-row: 1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 30px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--line-soft);
+  background: color-mix(in oklab, var(--bg-raised) 55%, transparent);
+  font-size: var(--text-xs);
+}
+.ed-debug[hidden] { display: none; }
+
+.ed-debug-phase { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-faint); }
+.ed-debug-phase i {
+  width: 6px;
+  height: 6px;
+  flex: none;
+  border-radius: 50%;
+  background: currentColor;
+}
+.ed-debug-phase b { font-weight: 600; }
+/* Colour only where it changes what you do: paused is the one that wants you. */
+.ed-debug[data-phase="running"] .ed-debug-phase { color: var(--ok); }
+.ed-debug[data-phase="starting"] .ed-debug-phase { color: var(--accent); }
+.ed-debug[data-phase="paused"] .ed-debug-phase { color: var(--warn); }
+.ed-debug[data-phase="error"] .ed-debug-phase { color: var(--risk); }
+
+.ed-debug-start {
+  min-height: 21px;
+  padding: 0 9px;
+  border: 1px solid color-mix(in oklab, var(--accent) 46%, transparent);
+  border-radius: 6px;
+  background: color-mix(in oklab, var(--accent) 15%, transparent);
+  color: var(--ink);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+.ed-debug-start[hidden] { display: none; }
+.ed-debug-start:hover { transform: none; background: color-mix(in oklab, var(--accent) 26%, transparent); }
+
+.ed-debug-controls { display: flex; align-items: center; gap: 2px; }
+.ed-debug-controls[hidden] { display: none; }
+.ed-debug-act {
+  width: 24px;
+  min-height: 22px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ink-dim);
+  font-size: var(--text-xs);
+  line-height: 1;
+}
+.ed-debug-act:hover:not(:disabled) { transform: none; color: var(--ink); background: var(--bg-raised); }
+.ed-debug-act:disabled { opacity: 0.32; }
+
+/* The file and line the program is stopped on. It repeats the amber band in words, for the
+   moment the band is scrolled off screen. */
+.ed-debug-where {
+  margin-left: auto;
+  color: var(--ink-faint);
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: var(--text-xs);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* --------------------------------------------------------------- conflict */
+
+.ed-conflict {
+  grid-row: 4;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  background: var(--bg-raised);
+  border-bottom: 1px solid var(--risk);
+  font-size: var(--text-sm);
+  color: var(--ink-dim);
+}
+.ed-conflict-text { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ed-conflict-text b { color: var(--ink); font-weight: 500; }
+.ed-conflict button { padding: 3px 9px; font-size: var(--text-xs); }
+.ed-conflict-take { background: var(--risk); color: var(--bg); }
+.ed-conflict-keep {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--ink-dim);
+}
+.ed-conflict-keep:hover { color: var(--ink); }
+
+/* ----------------------------------------------------------------- trail */
+
+/* ‹ › at the head of the tab strip. Faint until there is somewhere to go. */
+.ed-trail {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 1px;
+  padding: 0 4px 0 6px;
+  border-right: 1px solid var(--line-soft);
+}
+.ed-trail-btn {
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink-dim);
+  font-size: var(--text-xl);
+  line-height: 1;
+  cursor: pointer;
+}
+.ed-trail-btn:hover:not(:disabled) {
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+  color: var(--ink);
+  transform: none;
+}
+.ed-trail-btn:active { transform: none; }
+.ed-trail-btn:disabled { color: var(--ink-faint); opacity: 0.45; cursor: default; }
+
+/* ---------------------------------------------------------------- surface */
+
+.ed-surface { grid-row: 5; overflow: hidden; }
+body.is-cmd-held .files-root .ed-surface .cm-content { cursor: alias; }
+
+/* Non-text viewers share the editor's 1fr row with the code surface; only one is ever shown. */
+.ed-media {
+  grid-row: 5;
+  overflow: auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-sunken);
+}
+.ed-media-inner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  max-width: 100%;
+  max-height: 100%;
+  padding: 24px;
+  box-sizing: border-box;
+}
+.ed-media-inner.is-image img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: var(--radius-sm);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.35);
+  /* A checkerboard so transparent PNGs read as transparent, not as the panel colour. */
+  background-image:
+    linear-gradient(45deg, var(--line-soft) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--line-soft) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, var(--line-soft) 75%),
+    linear-gradient(-45deg, transparent 75%, var(--line-soft) 75%);
+  background-size: 20px 20px;
+  background-position: 0 0, 0 10px, 10px -10px, -10px 0;
+}
+.ed-media-inner.is-audio { width: 100%; }
+.ed-media-inner.is-audio audio { width: min(560px, 90%); }
+.ed-media-inner.is-video video { max-width: 100%; max-height: 100%; }
+.ed-media-inner.is-pdf { width: 100%; height: 100%; padding: 0; }
+.ed-pdf { width: 100%; height: 100%; border: 0; }
+.ed-media-note {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: center;
+  text-align: center;
+  color: var(--ink-dim);
+  font-size: var(--text-sm);
+}
+.ed-media-note b { color: var(--ink); font-size: var(--text-md); }
+/* Editor surface, minimap and scrollbars are shared — see features/editor/editor.css. */
+
+/* Where scrollbars remain (the tree), keep them thin and faint on air. */
+.ft-tree {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklab, var(--ink) 20%, transparent) transparent;
+}
+.ft-tree::-webkit-scrollbar { width: 8px; }
+.ft-tree::-webkit-scrollbar-track { background: transparent; }
+.ft-tree::-webkit-scrollbar-thumb {
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background: color-mix(in oklab, var(--ink) 18%, transparent);
+  background-clip: padding-box;
+}
+
+/* The find drawer owns its own row, so opening it shortens the buffer instead of covering it.
+   The component's own styles live in features/editor/find_in_project.css. */
+.ed > .fip { grid-row: 6; }
+
+/* ------------------------------------------------------------- status bar */
+
+/* Position, state, language — the three things a tab strip cannot say. Mono numerals so the
+   column stops jittering as the caret moves, which is the whole reason to have the bar. */
+.ed-status {
+  grid-row: 7;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  min-height: 24px;
+  padding: 0 10px 0 12px;
+  border-top: 1px solid var(--line-soft);
+  background: color-mix(in oklab, var(--bg-sunken) 55%, var(--bg));
+  font-size: var(--text-xs);
+  line-height: 1;
+  color: var(--ink-faint);
+  user-select: none;
+}
+
+/* The tab shows a basename. This is where the rest of the path lives, so two files with the
+   same name are never a guess. The folders give way; the filename never does. */
+.ed-status-path {
+  display: flex;
+  align-items: baseline;
+  min-width: 0;
+  overflow: hidden;
+}
+.ed-crumb-dir {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.ed-crumb-leaf {
+  flex: 0 0 auto;
+  color: var(--ink-dim);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.ed-status-related {
+  flex: 0 0 auto;
+  margin-left: 4px;
+  color: var(--ink-dim);
+}
+.ed-status-related:disabled { color: var(--ink-faint); cursor: default; }
+.ed-status-related:disabled:hover { background: transparent; }
+
+.ed-status-meta {
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 12px;
+}
+.ed-stat { white-space: nowrap; }
+.ed-stat.is-num {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-variant-numeric: tabular-nums;
+}
+/* A stat that acts. Same type as its neighbours until hovered, so the bar stays one line of
+   facts; the hover says "this one does something". */
+.ed-stat-act {
+  padding: 3px 5px;
+  margin: 0 -5px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.ed-stat-act:hover {
+  background: color-mix(in oklab, var(--ink) 8%, transparent);
+  color: var(--ink);
+  transform: none;
+}
+.ed-stat-act.is-on { color: var(--ink-dim); }
+/* State is the one thing here allowed a colour, because it is the one thing that can bite. */
+.ed-stat.is-ok { color: var(--ink-faint); }
+.ed-stat.is-warn { color: var(--warn); }
+.ed-stat.is-risk { color: var(--risk); }
+.ed-stat.is-lang { color: var(--ink-dim); }
+
+/* --------------------------------------------------------------- resting */
+
+/* The welcome artwork has its own surface; open buffers keep their plain theme. */
+.ed-empty {
+  grid-row: 5;
+  overflow: auto;
+  padding: clamp(16px, 3vw, 36px);
+  background: radial-gradient(ellipse at top right, var(--accent-soft), transparent 65%);
+}
+.ed-empty-card { max-width: 920px; margin: 0 auto; }
+.ed-welcome-hero {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+  min-height: 260px;
+  display: flex;
+  align-items: center;
+  border: 1px solid color-mix(in oklab, var(--accent) 24%, transparent);
+  border-radius: 16px;
+  background: #10121c;
+}
+.ed-wolf-art { position: absolute; inset: 0; z-index: -2; width: 100%; height: 100%; object-fit: cover; object-position: 70% 48%; }
+.ed-welcome-hero::after { content: ""; position: absolute; inset: 0; z-index: -1; background: linear-gradient(90deg, #10121cf2 0%, #10121cc4 35%, #10121c0a 78%); }
+.ed-welcome-copy { padding: 32px; max-width: 62%; }
+.ed-welcome-label { color: #a9b4d4; font: 600 var(--text-xs)/1.5 ui-monospace, Menlo, monospace; letter-spacing: .16em; }
+.ed-empty-title { margin: 14px 0 10px; max-width: 300px; color: #f0f2fa; font-size: clamp(24px, 3vw, 36px); line-height: 1.12; font-weight: 650; letter-spacing: -.045em; }
+.ed-empty-lede { max-width: 250px; margin: 0; color: #bcc5da; font-size: var(--text-sm); line-height: 1.65; }
+.ed-welcome-project { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; margin-top: 22px; padding: 5px 9px; border: 1px solid #8593b640; border-radius: 5px; color: #d5ddf0; font: var(--text-xs)/1.4 ui-monospace, Menlo, monospace; white-space: nowrap; }
+.ed-start-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(210px, 100%), 1fr)); gap: 10px; margin-top: 16px; }
+.ed-start-actions button { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 16px 12px; border: 1px solid var(--line); border-radius: 10px; color: var(--ink); background: color-mix(in oklab, var(--bg-raised) 75%, var(--bg)); text-align: left; }
+.ed-start-actions button:hover { transform: none; border-color: var(--accent); background: var(--accent-soft); }
+.ed-start-actions .ui-icon { flex: none; width: 18px; height: 18px; color: var(--accent); }
+.ed-start-actions button > span:first-of-type { flex: 1; min-width: 0; }
+.ed-start-actions b { display: block; font-size: var(--text-sm); font-weight: 600; }
+.ed-start-actions small { display: block; margin-top: 4px; color: var(--ink-faint); font-size: var(--text-xs); line-height: 1.5; }
+.ed-start-actions kbd, .ed-tool kbd, .ed-welcome-notes kbd { flex: none; color: var(--ink-faint); font: var(--text-xs)/1.5 ui-monospace, Menlo, monospace; }
+.ed-recent { margin-top: 24px; }
+.ed-recent h3 { margin: 0 0 10px; color: var(--ink-dim); font-size: var(--text-xs); font-weight: 600; }
+.ed-recent-files { display: grid; gap: 2px; }
+.ed-recent-files button { display: flex; justify-content: space-between; gap: 16px; padding: 9px 10px; min-width: 0; border: 0; border-radius: 6px; color: var(--ink-dim); background: transparent; text-align: left; }
+.ed-recent-files button:hover { transform: none; color: var(--ink); background: var(--accent-soft); }
+.ed-recent-files b { overflow: hidden; text-overflow: ellipsis; font-size: var(--text-xs); font-weight: 500; }
+.ed-recent-files span { overflow: hidden; text-overflow: ellipsis; color: var(--ink-faint); font: var(--text-xs)/1.5 ui-monospace, Menlo, monospace; white-space: nowrap; }
+.ed-welcome-notes { display: flex; flex-wrap: wrap; gap: 10px 24px; margin-top: 20px; color: var(--ink-faint); font-size: var(--text-xs); line-height: 1.6; }
+
+/* The jump-target flash lives with the shared editor — see features/editor/editor.css. */
+@keyframes ed-fade-out {
+  0%   { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/* Clears the status bar — a toast that half-covers the caret readout is how you lose both. */
+.ed-toast {
+  position: absolute;
+  right: 12px;
+  bottom: 34px;
+  max-width: 70%;
+  padding: 7px 10px;
+  border: 1px solid var(--risk);
+  border-radius: var(--radius-sm);
+  background: var(--bg-raised);
+  color: var(--ink);
+  font-size: var(--text-xs);
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity var(--base) var(--ease), transform var(--base) var(--ease);
+  pointer-events: none;
+}
+.ed-toast.is-on { opacity: 1; transform: none; }
+
+/* ------------------------------------------------------------- git in the tree */
+
+/* One letter, git's own. It rides the right edge of the row, where the type label used to be,
+   so the eye scans a single column instead of hunting mid-row. */
+.ft-git {
+  flex: 0 0 auto;
+  min-width: 12px;
+  color: var(--ink-faint);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  line-height: 1;
+  text-align: center;
+}
+/* A dirty file is not an alert. The name brightens, the letter carries the colour, and nothing
+   gets a background — a tree where a third of the rows are tinted is a tree you stop reading. */
+.ft-row.is-dirty .ft-name { color: var(--ink); }
+.ft-row.is-git-modified .ft-git,
+.ft-row.is-git-renamed .ft-git { color: var(--warn); }
+.ft-row.is-git-added .ft-git,
+.ft-row.is-git-untracked .ft-git { color: var(--ok); }
+.ft-row.is-git-deleted .ft-git { color: var(--ink-dim); }
+.ft-row.is-git-conflict .ft-git { color: var(--risk); }
+/* The folder rollup is the quietest mark on the screen. It only has to survive being scanned
+   past, because its whole job is to say "keep going down". */
+.ft-row.is-git-nested .ft-git { color: color-mix(in oklab, var(--warn) 55%, transparent); }
+.ft-row.is-git-nested .ft-name { color: inherit; }
+
+/* ------------------------------------------------------------------ the diff */
+
+/* Shares the drawer row with find-in-project. Both hidden by default and never both open, so
+   the row stays collapsed until one of them has something to say. */
+.ed-diff {
+  grid-row: 6;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: clamp(160px, 36vh, 380px);
+  min-height: 0;
+  border-top: 1px solid var(--risk);
+  background: color-mix(in oklab, var(--bg-sunken) 60%, var(--bg));
+}
+
+.ed-diff-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 7px 8px 7px 12px;
+  border-bottom: 1px solid var(--line-soft);
+  font-size: var(--text-sm);
+}
+.ed-diff-title { color: var(--ink); font-weight: 600; }
+
+.ed-diff-tally {
+  display: flex;
+  gap: 7px;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+.ed-diff-tally .is-add { color: var(--ok); }
+.ed-diff-tally .is-del { color: var(--risk); }
+
+/* Which side is which is the one thing you must not have to work out under pressure. */
+.ed-diff-legend {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink-faint);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ed-diff-close {
+  flex: 0 0 auto;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--ink-faint);
+  font-size: var(--text-lg);
+  line-height: 1;
+  cursor: pointer;
+  transition: color var(--fast) var(--ease);
+}
+.ed-diff-close:hover { color: var(--ink); transform: none; }
+.ed-diff-close:active { transform: none; }
+
+.ed-diff-body {
+  overflow: auto;
+  padding: 4px 0 10px;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: var(--text-sm);
+  line-height: 1.55;
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklab, var(--ink) 20%, transparent) transparent;
+}
+.ed-diff-body::-webkit-scrollbar { width: 8px; height: 8px; }
+.ed-diff-body::-webkit-scrollbar-track { background: transparent; }
+.ed-diff-body::-webkit-scrollbar-thumb {
+  border-radius: 4px;
+  border: 2px solid transparent;
+  background: color-mix(in oklab, var(--ink) 18%, transparent);
+  background-clip: padding-box;
+}
+
+/* Two number columns, the sign, then the line. Both numbers, because on a conflict you need to
+   know where the change lands in YOUR file as well as in theirs. */
+.ed-diff-row {
+  display: grid;
+  grid-template-columns: 44px 44px 14px minmax(0, 1fr);
+  align-items: baseline;
+  padding: 0 12px 0 0;
+  color: var(--ink-dim);
+  white-space: pre;
+}
+.ed-diff-no {
+  padding-right: 8px;
+  color: var(--ink-faint);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+.ed-diff-sign { text-align: center; font-weight: 700; }
+.ed-diff-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+
+/* Tinted rows, not tinted text — the code has to stay readable while the row states its side. */
+.ed-diff-row.is-add {
+  background: color-mix(in oklab, var(--ok) 13%, transparent);
+  color: var(--ink);
+}
+.ed-diff-row.is-add .ed-diff-sign { color: var(--ok); }
+.ed-diff-row.is-del {
+  background: color-mix(in oklab, var(--risk) 13%, transparent);
+  color: var(--ink);
+}
+.ed-diff-row.is-del .ed-diff-sign { color: var(--risk); }
+
+/* ------------------------------------------------------------------ menu */
+
+/* One context menu for the tree and the tab strip. App chrome, not editor surface: the same
+   raised panel the pickers use, sized to its items, never wider than its longest label. */
+.ed-menu {
+  position: absolute;
+  z-index: 60;
+  min-width: 190px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--bg-raised);
+  box-shadow: 0 14px 40px color-mix(in oklab, #000 34%, transparent);
+}
+.ed-menu hr {
+  margin: 4px 6px;
+  border: 0;
+  border-top: 1px solid var(--line-soft);
+}
+.ed-menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  width: 100%;
+  padding: 5px 9px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink);
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.ed-menu-item:hover:not(:disabled),
+.ed-menu-item:focus-visible {
+  background: color-mix(in oklab, var(--accent) 15%, transparent);
+  outline: none;
+  transform: none;
+}
+.ed-menu-item:disabled { color: var(--ink-faint); cursor: default; }
+.ed-menu-item.is-danger { color: var(--risk); }
+.ed-menu-item kbd {
+  color: var(--ink-faint);
+  font-family: inherit;
+  font-size: var(--text-xs);
+}
+
+/* Work tools stay reachable after a file replaces the welcome screen. */
+.files-root { container-type: inline-size; }
+.files-root.is-focused { grid-template-columns: minmax(0, 1fr); }
+.ft-head { display: flex; align-items: center; gap: 8px; padding: 12px 10px 5px; min-width: 0; }
+.ft-head img { flex: none; border-radius: 7px; }
+.ft-head > span { flex: 1; min-width: 0; }
+.ft-head small { display: block; color: var(--ink-faint); font: var(--text-xs)/1.4 ui-monospace, Menlo, monospace; letter-spacing: .12em; }
+.ft-project { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-dim); font-size: var(--text-xs); font-weight: 600; }
+.ed-toolbar { grid-row: 3; display: flex; align-items: center; flex-wrap: wrap; gap: 4px; min-height: 36px; padding: 4px 8px; border-bottom: 1px solid var(--line-soft); background: color-mix(in oklab, var(--bg-raised) 40%, var(--bg)); }
+.ed-tool { display: inline-flex; align-items: center; justify-content: center; gap: 9px; flex: none; min-height: 27px; padding: 4px 9px; border: 1px solid transparent; border-radius: 5px; background: transparent; color: var(--ink-dim); font-size: var(--text-xs); }
+.ed-tool .ui-icon { width: 14px; height: 14px; }
+.ed-tool:hover:not(:disabled) { transform: none; background: var(--accent-soft); color: var(--ink); }
+.ed-tool:disabled { opacity: .4; cursor: default; }
+.ed-tool[aria-pressed="true"] { background: var(--accent-soft); color: var(--accent); }
+.ed-tool-save.has-changes { border-color: color-mix(in oklab, var(--accent) 35%, var(--line)); background: var(--accent-soft); color: var(--ink); }
+.ed-tool-spacer { flex: 1; }
+.ed-tool:focus-visible, .ed-start-actions button:focus-visible, .ed-recent-files button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.files-root .ed-tab.is-active { background: color-mix(in oklab, var(--accent) 7%, var(--bg)); }
+.files-root .ed-tab { min-height: 35px; }
+.files-root .ft-row { min-height: 26px; }
+@container (max-width: 720px) {
+  .ed-welcome-copy { padding: 24px; max-width: 75%; }
+  .ed-welcome-hero { min-height: 220px; }
+  .ed-tool kbd { display: none; }
+  .ed-welcome-notes { display: grid; }
+}

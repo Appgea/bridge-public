@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <title>Panel — chat screen harness</title>
+  </head>
+  <body>
+    <main id="app">
+      <aside class="sidebar">
+        <header class="brand">
+          <span class="brand-mark" aria-hidden="true"></span>
+          <span><small>APPGEA</small><b>Panel</b></span>
+        </header>
+        <nav id="chatNav" class="side-nav chat-nav" aria-label="Reports and manager">
+          <button id="chatButton" class="nav-row is-on" type="button" aria-pressed="true">
+            <span class="nav-glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 5h16v11H8l-4 3z"/></svg></span>
+            Reports <span id="chatBadge" class="nav-badge">3</span>
+          </button>
+          <button id="cpoButton" class="nav-row" type="button" aria-pressed="false">
+            <span class="nav-glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 6h16v12H4z"/><path d="m8 10 2.5 2L8 14"/><path d="M13 14h3"/></svg></span>
+            Manager
+          </button>
+        </nav>
+        <nav id="workspaceNav" class="side-nav" aria-label="Workspace">
+          <span class="side-label side-nav-label"><span>WORKSPACE</span></span>
+          <button class="nav-row" type="button">
+            <span class="nav-glyph" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="m8 5 11 7-11 7Z"/></svg></span> Runs
+          </button>
+        </nav>
+        <section id="projectsSection" class="side-section projects-section">
+          <div class="side-label projects-label"><span>PROJECTS</span></div>
+          <div id="projectList" class="project-list"></div>
+        </section>
+      </aside>
+
+      <aside id="chatRail"></aside>
+
+      <!-- Chat is a screen now and owns the work track; Home is here only to receive the archive. -->
+      <section id="homeScreen" class="home" hidden></section>
+    </main>
+    <script type="module" src="/src/dev_chat.ts"></script>
+  </body>
+</html>

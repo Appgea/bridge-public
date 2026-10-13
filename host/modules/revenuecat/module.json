@@ -1,0 +1,14 @@
+{
+  "name": "revenuecat",
+  "title": "RevenueCat",
+  "visibility": "public",
+  "summary": "Subscriptions, offerings and paywalls read live from RevenueCat. Needs a RevenueCat API key.",
+  "icon": "↗",
+  "protocol": "cgi-argv",
+  "buildInputs": [],
+  "exec": "bin/host.py",
+  "args": [],
+  "requires": [
+    "python3"
+  ]
+}

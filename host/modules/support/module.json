@@ -1,0 +1,15 @@
+{
+  "name": "support",
+  "title": "Support",
+  "visibility": "public",
+  "summary": "Every support form in the portfolio, read into one inbox. Needs a Google service-account key.",
+  "icon": "✉",
+  "protocol": "cgi-argv",
+  "buildInputs": [],
+  "exec": "bin/host.py",
+  "args": [],
+  "agentDoc": "AGENT.md",
+  "requires": [
+    "python3"
+  ]
+}

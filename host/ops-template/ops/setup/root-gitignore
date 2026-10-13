@@ -1,0 +1,3 @@
+# Ephemeral copy-paste handoff files — never a record until explicitly saved.
+scratch/
+.DS_Store

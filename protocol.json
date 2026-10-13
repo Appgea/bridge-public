@@ -1,0 +1,95 @@
+{
+  "_note": "Single source of truth for the CORE panel-feed expression types. launch.py generates the agent-facing doc from this; components.js registers a renderer per `type`. Keep them in lockstep — test_panel.py asserts parity. Modules add their own types via their module.json `types` field, not here.",
+  "types": [
+    {
+      "type": "trace",
+      "kind": "display",
+      "purpose": "A replayable walk through code you read — kills the wall-of-text, makes your understanding auditable.",
+      "when": "You read across several files and want the human to see HOW you understood the system (and catch a wrong turn).",
+      "example": {"title": "how login reaches the DB", "steps": [{"ref": "auth/login.dart:20", "label": "controller receives creds", "detail": "validates then calls AuthService"}, {"ref": "services/auth.dart:88", "label": "AuthService.verify", "detail": "hashes, hits UserRepo"}]}
+    },
+    {
+      "type": "card",
+      "kind": "display+input",
+      "purpose": "The generic primitive: compose ANY one-off expression from fixed blocks — zero new code. Use this whenever no bespoke type fits; never invent a new type name.",
+      "when": "The long tail — a status snapshot, a summary with evidence, a small report, a contextual ask. Reach for it before proposing a module.",
+      "example": {"title": "Migration risk", "icon": "⚠", "ref": "auth-refactor", "blocks": [{"kind": "kv", "rows": [{"k": "files touched", "v": "6"}, {"k": "reversible", "v": "yes", "tone": "ok"}]}, {"kind": "meter", "label": "test coverage", "value": 72, "max": 100, "tone": "warn"}, {"kind": "callout", "tone": "risk", "text": "moves a **money** flag onto AuthService"}, {"kind": "input", "input": {"kind": "pick", "id": "proceed", "ask": "Ship this refactor?", "options": [{"id": "ship", "title": "Ship it"}, {"id": "hold", "title": "Hold for review"}], "rec": "hold", "why": "the money flag deserves a second look"}}]},
+      "blocks": [
+        "heading {text, sub?} — section identity",
+        "text {md} — prose glue (inline **bold** / `code` only)",
+        "kv {rows:[{k,v,tone?}]} — labelled facts",
+        "meter {label, value, max?, tone?, note?} — a magnitude/progress bar",
+        "badges {items:[{text,tone}|string]} — status chips at a glance",
+        "steps {items:[{label, state, note?}]} — sequence; state = done|active|pending|fail",
+        "callout {tone, text} — one emphasized line; tone = info|ok|warn|risk",
+        "coderef {file, lines?, note?} — a location in code",
+        "table {cols:[...≤4], rows:[[...]]} — a small matrix",
+        "divider {} — a rule between groups",
+        "input {input:{...}} — an input-kit object; ALWAYS the last block(s), never above the evidence"
+      ]
+    },
+    {
+      "type": "pick",
+      "kind": "input",
+      "purpose": "A signed single-choice ask. Mark your recommendation with `rec` (an option id) + a one-line `why`; the human can override.",
+      "when": "One real decision with a small set of named options. Never ask cold — put it after the trace/card that framed it.",
+      "example": {"id": "store", "ask": "Which local store?", "ref": "sync-layer", "options": [{"id": "sqlite", "title": "SQLite", "desc": "relational, migrations"}, {"id": "hive", "title": "Hive", "desc": "key-value, faster"}], "rec": "sqlite", "why": "you already query relationally in three places"}
+    },
+    {
+      "type": "multi",
+      "kind": "input",
+      "purpose": "Choose several from a set. `rec` is an array of ids; `min`/`max` bound the selection.",
+      "when": "The answer is a subset, not one option (e.g. which platforms, which checks to run).",
+      "example": {"id": "platforms", "ask": "Ship to which platforms?", "options": [{"id": "ios", "title": "iOS"}, {"id": "android", "title": "Android"}, {"id": "web", "title": "Web"}], "rec": ["ios", "android"], "min": 1}
+    },
+    {
+      "type": "text",
+      "kind": "input",
+      "purpose": "A free-text answer with YOUR proposed draft pre-filled — the draft IS your signature; the human accepts or edits it.",
+      "when": "You need a sentence/name/value only the human can settle, but you can propose a strong default.",
+      "example": {"id": "commit-msg", "ask": "Release note for this build?", "draft": "Fixes crash on empty cart; faster cold start.", "multiline": true}
+    },
+    {
+      "type": "tier",
+      "kind": "input",
+      "purpose": "Pick a level on a small ordered scale (how urgent, how big). Use plain, everyday words for the levels — never codes. Sign your `rec`.",
+      "when": "The decision is a degree, not a branch.",
+      "example": {"id": "urgency", "ask": "How soon should we fix the login problem?", "tiers": ["Right now", "This week", "Later"], "rec": "Right now", "why": "nobody can sign in until it's fixed"}
+    },
+    {
+      "type": "confirm",
+      "kind": "gate",
+      "purpose": "A STOP-tier approval gate. It does NOT queue with other picks — it posts ALONE the moment the human decides. Use for anything irreversible or money/publish-tier.",
+      "when": "Store submit/publish, production release, spend, credential swap, destructive action. Asking IS the recommendation.",
+      "example": {"id": "submit", "action": "Submit Tavla 2.4.0 to App Store review?", "detail": "This is public and hard to reverse.", "danger": true}
+    },
+    {
+      "type": "worklist",
+      "kind": "display",
+      "purpose": "The files the HUMAN still has to touch, each with a reason. Not what you already changed — what you are handing them. This is the working set the panel opens for them.",
+      "when": "You analysed a change and some of it needs a human hand (judgment, taste, a secret, a decision you shouldn't make). Name only those files; a worklist of everything is a worklist of nothing.",
+      "example": {"title": "retry guard", "files": [{"path": "lib/services/auth.dart", "why": "add the backoff here — the retry budget is a product call", "ref": "lib/services/auth.dart:88"}, {"path": "lib/views/login.dart", "why": "surface the new error state; copy is yours"}]}
+    },
+    {
+      "type": "structure",
+      "kind": "display",
+      "purpose": "A layered architecture blueprint. `hot` highlights a node; `violation` draws a red arc for a layering breach.",
+      "when": "Making an architecture point — showing layers/deps or flagging that a plan breaks them.",
+      "example": {"layers": ["UI", "Domain", "Data"], "nodes": [{"id": "cart", "layer": 0, "label": "CartView"}, {"id": "svc", "layer": 1, "label": "CartService", "hot": true}, {"id": "db", "layer": 2, "label": "Repo"}], "deps": [["cart", "svc"], ["svc", "db"]]}
+    },
+    {
+      "type": "showcase",
+      "kind": "display",
+      "purpose": "Phone mockups backing a visual/UX point.",
+      "when": "Arguing a visual/flow change — show the shots, don't describe them.",
+      "example": {"shots": [{"title": "Onboarding", "cap": "before", "color": "#7c5cff"}, {"title": "Onboarding", "cap": "after — one screen", "color": "#3fb950"}]}
+    },
+    {
+      "type": "educate",
+      "kind": "display",
+      "purpose": "Teach the codebase so the human's ownership survives even if the LLM is gone: tap a class -> plain what-it-is + what breaks if it fails.",
+      "when": "Handing off understanding of a subsystem — a durable map, not a one-off explanation.",
+      "example": {"classes": [{"n": "AuthService", "l": "Services", "file": "services/auth.dart:12", "p": "verifies credentials and issues sessions", "f": "nobody can log in", "t": "UserRepo, TokenStore"}]}
+    }
+  ]
+}

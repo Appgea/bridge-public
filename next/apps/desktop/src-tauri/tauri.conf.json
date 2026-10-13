@@ -1,0 +1,43 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "Appgea Panel",
+  "version": "0.1.0",
+  "identifier": "com.appgea.panel",
+  "build": {
+    "beforeDevCommand": "npm --prefix ui run dev",
+    "beforeBuildCommand": "npm --prefix ui run build",
+    "devUrl": "http://127.0.0.1:1420",
+    "frontendDist": "../ui/dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "label": "main",
+        "title": "Appgea Panel || See what you are doing",
+        "width": 1440,
+        "height": 900,
+        "minWidth": 1040,
+        "minHeight": 680,
+        "backgroundColor": "#070910",
+        "center": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; connect-src ipc: http://ipc.localhost http://127.0.0.1:1420 ws://127.0.0.1:1420 module: http://module.localhost project-asset: http://project-asset.localhost; script-src 'self' module: http://module.localhost; style-src 'self' 'unsafe-inline' module: http://module.localhost; frame-src module: http://module.localhost; img-src 'self' data: blob: module: http://module.localhost project-icon: http://project-icon.localhost project-asset: http://project-asset.localhost; media-src 'self' project-asset: http://project-asset.localhost; font-src 'self' data: module: http://module.localhost",
+      "dangerousDisableAssetCspModification": ["style-src"]
+    }
+  },
+  "bundle": {
+    "active": true,
+    "resources": {
+      "../../../target/package/host": "host"
+    },
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}

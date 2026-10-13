@@ -1,0 +1,33 @@
+# local per-machine state (recreated on first run / `panel setup`)
+config.json
+instances.json
+daemon-session.id
+tmux-session.uuid
+decisions.md
+decisions.jsonl
+*.log
+.DS_Store
+uploads/
+
+# opsroot/ is gone. One person's portfolio brain now lives at ~/.appgeapanel/ops, outside every
+# git tree. What ships is host/ops-template/: the same structure with none of the content, copied
+# into ~/.appgeapanel/ops on first run.
+#
+# Kept ignored so an old checkout can't reintroduce it.
+opsroot/
+
+# python bytecode + local backups (not part of the shipped tool)
+__pycache__/
+*.pyc
+ops-backup-*.tgz
+
+# host/modules/product-spine is its own git repo (cloned separately, ~170MB w/ build cache) —
+# a runtime dependency, not panel source. Don't vendor it into this repo's history.
+host/modules/product-spine/
+
+
+# Keep legacy local vault material out of source control.
+vault/secrets/
+vault/legacy/
+vault/key.json
+vault/catalog.json

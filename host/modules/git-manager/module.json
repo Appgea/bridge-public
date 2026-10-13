@@ -1,0 +1,39 @@
+{
+  "name": "git-manager",
+  "title": "Git",
+  "visibility": "public",
+  "summary": "Branch, status, commit graph and bulk pull across every repo. Needs nothing but git.",
+  "icon": "🌿",
+  "protocol": "cgi-argv",
+  "buildInputs": [],
+  "exec": "bin/host.py",
+  "args": [],
+  "assets": "assets",
+  "card": "/card",
+  "chatAsset": {
+    "js": "assets/chat.js",
+    "css": "assets/chat.css"
+  },
+  "agentDoc": "AGENT.md",
+  "animations": {
+    "uses": [
+      "core:flow",
+      "core:shimmer",
+      "core:pop",
+      "core:rise"
+    ],
+    "owns": [
+      "git-manager:march",
+      "git-manager:edge-in",
+      "git-manager:head-pulse",
+      "git-manager:converge",
+      "git-manager:landed",
+      "git-manager:pull-incoming",
+      "git-manager:pull-land"
+    ]
+  },
+  "requires": [
+    "python3",
+    "git"
+  ]
+}

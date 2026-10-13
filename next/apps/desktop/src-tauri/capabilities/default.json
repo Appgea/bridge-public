@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-window",
+  "description": "Allows the Panel window to receive agent and terminal events.",
+  "windows": ["main"],
+  "permissions": ["core:default", "core:event:default", "core:window:allow-set-theme"]
+}

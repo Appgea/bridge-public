@@ -1,0 +1,3 @@
+month,app_key,source,gross_usd,net_usd,note
+# source = paypal | admob | iap | subscription
+# one row per app per source per month. Copy to YYYY-MM.csv and fill.

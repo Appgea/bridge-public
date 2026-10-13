@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "_note": "Copied to ~/.appgeapanel/state/server-health/targets.json on first run. Edit that copy, not this file. Ships empty on purpose — Panel does not know what you run, and a monitor seeded with someone else's servers is noise you have to clear before it is worth anything. Ask an agent to set it up: it reads AGENT.md and calls POST /m/server-health/targets/add.",
+  "_example": {
+    "id": "api",
+    "label": "API",
+    "url": "https://api.example.com/health",
+    "checks": ["dns", "http", "tls", "json", "latency"],
+    "expect": { "status": 200, "json": { "status": "ok" } },
+    "tls_warn_days": 21,
+    "timeout_s": 10,
+    "slow_ms": 2500,
+    "enabled": true,
+    "note": "why this matters, and what breaks when it is down"
+  },
+  "targets": []
+}

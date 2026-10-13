@@ -1,0 +1,119 @@
+/* The in-app stand-in for the webview's missing native dialogs. Deliberately plain: a dim
+   backdrop and one centered card, so it reads as a system prompt rather than app content. */
+
+.dlg-wrap {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(3, 5, 10, 0.55);
+  backdrop-filter: blur(2px);
+}
+
+.dlg-card {
+  min-width: 300px;
+  max-width: 460px;
+  padding: 18px 18px 14px;
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+  background: var(--bg-sunken);
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.5);
+  outline: none;
+}
+
+.dlg-msg {
+  margin: 0 0 14px;
+  /* Author strings carry their own line breaks. */
+  white-space: pre-wrap;
+  font-size: var(--text-md);
+  line-height: 1.5;
+  color: var(--ink);
+}
+
+.dlg-input {
+  width: 100%;
+  margin-bottom: 14px;
+  padding: 7px 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--bg);
+  color: var(--ink);
+  font-size: var(--text-md);
+  font-family: ui-monospace, Menlo, monospace;
+}
+.dlg-input:focus {
+  outline: none;
+  border-color: color-mix(in oklab, var(--accent) 55%, transparent);
+}
+
+.dlg-checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0 0 14px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.dlg-check {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 6px 8px;
+  border-radius: 7px;
+  font-size: var(--text-md);
+  color: var(--ink);
+  cursor: pointer;
+}
+.dlg-check:hover { background: color-mix(in oklab, var(--accent) 8%, transparent); }
+.dlg-check input { accent-color: var(--accent); }
+.dlg-check small {
+  margin-left: auto;
+  font-size: var(--text-xs);
+  color: var(--ink-faint);
+}
+.dlg-check.is-disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+.dlg-check.is-disabled:hover { background: transparent; }
+
+.dlg-row {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.dlg-btn {
+  padding: 6px 14px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink-dim);
+  font-size: var(--text-sm);
+  font-weight: 550;
+  cursor: pointer;
+  transition: color var(--fast) var(--ease), border-color var(--fast) var(--ease),
+    background var(--fast) var(--ease);
+}
+.dlg-btn:hover { color: var(--ink); }
+.dlg-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.dlg-primary {
+  border-color: color-mix(in oklab, var(--accent) 55%, transparent);
+  background: color-mix(in oklab, var(--accent) 16%, transparent);
+  color: var(--ink);
+}
+.dlg-primary:hover { background: color-mix(in oklab, var(--accent) 26%, transparent); }
+
+.dlg-danger {
+  border-color: color-mix(in oklab, var(--risk) 55%, transparent);
+  background: color-mix(in oklab, var(--risk) 16%, transparent);
+  color: var(--ink);
+}
+.dlg-danger:hover { background: color-mix(in oklab, var(--risk) 28%, transparent); }

@@ -1,0 +1,262 @@
+.dbg-root {
+  --dbg: #ef5b72;
+  height: 100%;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  color: var(--ink);
+  background: var(--bg);
+}
+
+.dbg-root [hidden] { display: none !important; }
+
+.dbg-toolbar {
+  min-height: 48px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-raised);
+}
+
+.dbg-status {
+  min-width: 104px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink-dim);
+  font-size: var(--text-xs);
+}
+
+.dbg-status i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--ink-faint);
+}
+
+.dbg-root[data-phase="starting"] .dbg-status i,
+.dbg-root[data-phase="running"] .dbg-status i { background: var(--ok); }
+.dbg-root[data-phase="paused"] .dbg-status i { background: var(--warn); }
+.dbg-root[data-phase="error"] .dbg-status i { background: var(--risk); }
+
+.dbg-select,
+.dbg-primary,
+.dbg-action,
+.dbg-repl input {
+  height: 30px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: var(--ink);
+  background: var(--bg-sunken);
+  font: inherit;
+}
+
+.dbg-select {
+  max-width: 220px;
+  padding: 0 28px 0 9px;
+  font-size: var(--text-xs);
+}
+
+.dbg-target { max-width: 280px; }
+
+.dbg-primary {
+  padding: 0 15px;
+  border-color: color-mix(in oklab, var(--dbg) 76%, var(--line));
+  color: var(--on-accent);
+  background: var(--dbg);
+  font-size: var(--text-xs);
+  font-weight: 700;
+}
+
+.dbg-controls {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: auto;
+}
+
+.dbg-action {
+  width: 32px;
+  padding: 0;
+  color: var(--ink-dim);
+  background: transparent;
+  font-size: var(--text-md);
+}
+
+.dbg-action:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: color-mix(in oklab, var(--dbg) 52%, var(--line));
+}
+
+.dbg-action:last-child { color: var(--risk); }
+.dbg-action:disabled { opacity: 0.34; }
+
+.dbg-body {
+  min-height: 0;
+  display: grid;
+  grid-template-columns: minmax(240px, 31%) minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) minmax(150px, 34%);
+}
+
+.dbg-panel { min-width: 0; min-height: 0; background: var(--bg); }
+.dbg-stack-panel {
+  grid-row: 1 / 3;
+  display: grid;
+  grid-template-rows: auto minmax(90px, 1fr) auto auto minmax(100px, 1fr);
+  border-right: 1px solid var(--line);
+}
+.dbg-vars-panel { display: grid; grid-template-rows: auto minmax(0, 1fr); }
+.dbg-console-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  border-top: 1px solid var(--line);
+}
+
+.dbg-panel-head {
+  min-height: 34px;
+  display: flex;
+  align-items: center;
+  padding: 0 12px;
+  color: var(--ink-dim);
+  border-bottom: 1px solid var(--line-soft);
+  background: color-mix(in oklab, var(--bg-raised) 72%, var(--bg));
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.dbg-breakpoint-head { border-top: 1px solid var(--line); }
+.dbg-hint { padding: 8px 12px 3px; color: var(--ink-faint); font-size: var(--text-xs); }
+.dbg-list,
+.dbg-vars,
+.dbg-output { min-height: 0; overflow: auto; }
+
+.dbg-stack-row,
+.dbg-breakpoint-row > button:first-child {
+  width: 100%;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 2px;
+  padding: 8px 12px;
+  border: 0;
+  color: var(--ink);
+  background: transparent;
+  text-align: left;
+}
+
+.dbg-stack-row:hover,
+.dbg-stack-row.is-selected { background: color-mix(in oklab, var(--dbg) 12%, transparent); }
+.dbg-stack-row.is-selected { box-shadow: inset 2px 0 var(--dbg); }
+.dbg-stack-row b { overflow: hidden; font-size: var(--text-xs); text-overflow: ellipsis; white-space: nowrap; }
+.dbg-stack-row small { color: var(--ink-faint); font-size: var(--text-xs); }
+
+.dbg-breakpoint-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 28px;
+  align-items: center;
+}
+.dbg-breakpoint-row > button:first-child {
+  grid-template-columns: 9px minmax(0, 1fr);
+  align-items: center;
+}
+.dbg-breakpoint-row > button:first-child i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--risk);
+}
+.dbg-breakpoint-row span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--text-xs);
+}
+.dbg-remove {
+  width: 24px;
+  height: 24px;
+  border: 0;
+  color: var(--ink-faint);
+  background: transparent;
+  font-size: var(--text-lg);
+}
+.dbg-remove:hover { color: var(--risk); }
+
+.dbg-vars { padding: 6px 0 18px; }
+.dbg-scope > header {
+  padding: 7px 12px;
+  color: var(--ink-dim);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  text-transform: uppercase;
+}
+.dbg-variable-line {
+  width: 100%;
+  min-height: 26px;
+  display: grid;
+  grid-template-columns: minmax(100px, 34%) minmax(0, 1fr);
+  align-items: start;
+  gap: 12px;
+  padding: 5px 12px 5px 20px;
+  border: 0;
+  color: var(--ink);
+  background: transparent;
+  text-align: left;
+}
+button.dbg-variable-line { cursor: pointer; }
+button.dbg-variable-line:hover { background: var(--line-soft); }
+.dbg-variable-line b { overflow: hidden; color: #75c7ff; font-size: var(--text-xs); text-overflow: ellipsis; }
+.dbg-variable-line span { overflow-wrap: anywhere; color: var(--ink-dim); font: var(--text-xs)/1.45 "SF Mono", Menlo, monospace; }
+.dbg-variable-children { margin-left: 14px; border-left: 1px solid var(--line); }
+.dbg-variable.is-open > .dbg-variable-line { background: color-mix(in oklab, var(--dbg) 7%, transparent); }
+
+.dbg-output {
+  margin: 0;
+  padding: 10px 12px;
+  color: var(--ink-dim);
+  background: var(--bg-sunken);
+  font: var(--text-xs)/1.55 "SF Mono", Menlo, monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.dbg-repl {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-top: 1px solid var(--line-soft);
+  background: var(--bg-sunken);
+}
+.dbg-repl span { color: var(--dbg); font: 700 var(--text-sm) "SF Mono", Menlo, monospace; }
+.dbg-repl input { width: 100%; padding: 0 9px; outline: 0; font: var(--text-xs) "SF Mono", Menlo, monospace; }
+.dbg-repl input:focus { border-color: color-mix(in oklab, var(--dbg) 58%, var(--line)); }
+
+.dbg-muted,
+.dbg-error { margin: 0; padding: 10px 12px; color: var(--ink-faint); font-size: var(--text-xs); }
+.dbg-error { color: var(--risk); }
+
+.dbg-empty {
+  place-self: center;
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  /* It sat flush under the tab rail; the same breathing room every other empty state has. */
+  margin: 72px 24px;
+  padding: 24px 28px;
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+  color: var(--ink-dim);
+  text-align: center;
+}
+.dbg-empty b { color: var(--ink); font-size: var(--text-lg); }
+.dbg-empty p { margin: 0; font-size: var(--text-sm); }
+
+@media (max-width: 1120px) {
+  .dbg-status { min-width: auto; }
+  .dbg-target { max-width: 190px; }
+  .dbg-body { grid-template-columns: 260px minmax(0, 1fr); }
+}

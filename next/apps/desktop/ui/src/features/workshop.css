@@ -1,0 +1,256 @@
+/*
+ * The workshop is game-like because real work visibly changes its state. It never invents
+ * scores or activity. Infinite motion exists only while an agent is actually working; file and
+ * checkpoint motion are one-shot transforms/opacity, matching Panel's compositor budget.
+ */
+
+.dash-workshop:empty { display: none; }
+.workshop {
+  --ws-tone: var(--ink-faint);
+  overflow: hidden;
+  border: 1px solid color-mix(in oklab, var(--ws-tone) 24%, var(--line));
+  border-radius: 15px;
+  background:
+    radial-gradient(circle at 12% 5%, color-mix(in oklab, var(--ws-tone) 10%, transparent), transparent 34%),
+    var(--bg-raised);
+  transition: border-color var(--base) var(--ease), background var(--base) var(--ease);
+}
+.workshop.is-working { --ws-tone: var(--accent); }
+.workshop.is-asking { --ws-tone: var(--warn); }
+.workshop.is-done { --ws-tone: var(--ok); }
+.workshop.is-error { --ws-tone: var(--risk); }
+
+.ws-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 10px 13px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.ws-head > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--ink-faint);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: .14em;
+}
+.ws-head > span i { width: 6px; height: 6px; border-radius: 50%; background: var(--ws-tone); }
+.ws-head > b {
+  max-width: 68%;
+  color: var(--ws-tone);
+  font-size: var(--text-xs);
+  font-weight: 550;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ws-scene {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(92px, .26fr) minmax(0, 1fr);
+  grid-template-rows: minmax(142px, auto) auto;
+  min-height: 200px;
+}
+.ws-scene::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: .34;
+  background-image:
+    linear-gradient(var(--line-soft) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-soft) 1px, transparent 1px);
+  background-size: 28px 28px;
+  mask-image: linear-gradient(to bottom, black, transparent 88%);
+}
+
+.ws-bay {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 7px;
+  padding: 24px 10px 20px;
+  border-right: 1px solid var(--line-soft);
+}
+.ws-bay[hidden] { display: none; }
+.ws-robot { display: grid; justify-items: center; gap: 7px; color: var(--ink-faint); }
+.ws-robot small {
+  max-width: 68px;
+  font: var(--text-xs)/1.2 ui-monospace, Menlo, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-robot-body {
+  position: relative;
+  width: 34px;
+  height: 31px;
+  border: 1px solid color-mix(in oklab, var(--ws-tone) 48%, var(--line));
+  border-radius: 10px 10px 8px 8px;
+  background: color-mix(in oklab, var(--ws-tone) 10%, var(--bg-sunken));
+  transform-origin: 50% 100%;
+}
+.ws-antenna {
+  position: absolute;
+  left: 50%; top: -8px;
+  width: 1px; height: 7px;
+  background: var(--ws-tone);
+}
+.ws-antenna::after {
+  content: "";
+  position: absolute;
+  left: -2px; top: -3px;
+  width: 5px; height: 5px;
+  border-radius: 50%;
+  background: var(--ws-tone);
+}
+.ws-eye { position: absolute; top: 10px; width: 4px; height: 4px; border-radius: 50%; background: var(--ws-tone); }
+.ws-eye.e-one { left: 9px; }
+.ws-eye.e-two { right: 9px; }
+.ws-arm {
+  position: absolute;
+  right: -9px; bottom: 5px;
+  width: 12px; height: 2px;
+  border-radius: 2px;
+  background: var(--ws-tone);
+  transform-origin: 1px 1px;
+}
+.workshop.is-working .ws-robot-body { animation: ws-work 1.45s var(--ease) infinite; }
+.workshop.is-working .ws-arm { animation: ws-type .48s ease-in-out infinite alternate; }
+@keyframes ws-work { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+@keyframes ws-type { from { transform: rotate(8deg); } to { transform: rotate(-20deg); } }
+
+.ws-floor { position: relative; z-index: 1; padding: 13px; }
+.ws-empty { height: 100%; display: grid; place-content: center; justify-items: center; text-align: center; color: var(--ink-faint); }
+.ws-empty[hidden] { display: none; }
+.ws-empty > i { color: var(--ws-tone); font-size: var(--text-2xl); font-style: normal; margin-bottom: 6px; }
+.ws-empty > b { color: var(--ink-dim); font-size: var(--text-sm); }
+.ws-empty > small { margin-top: 3px; font-size: var(--text-xs); }
+
+.ws-files { display: grid; grid-template-columns: repeat(auto-fit, minmax(142px, 1fr)); gap: 8px; }
+.ws-file {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 5px;
+  min-height: 86px;
+  padding: 11px;
+  overflow: hidden;
+  text-align: left;
+  color: var(--ink);
+  background: color-mix(in oklab, var(--bg-sunken) 80%, transparent);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+.ws-file:hover { transform: translateY(-2px); border-color: color-mix(in oklab, var(--accent) 46%, var(--line)); }
+.ws-file.is-relevant:not(.is-edited) {
+  border-color: color-mix(in oklab, var(--m-work) 34%, var(--line));
+}
+.ws-file.is-relevant:not(.is-edited) .ws-edit-count { color: var(--m-work); }
+.ws-file.is-relevant:not(.is-edited) .ws-file-top i {
+  border-color: var(--m-work);
+  transform: rotate(45deg) scale(.78);
+}
+.ws-file-top { display: flex; align-items: center; gap: 7px; }
+.ws-file-top i { width: 8px; height: 10px; border: 1px solid var(--ink-faint); border-radius: 2px; }
+.ws-file-top b { font: 600 var(--text-sm)/1.2 ui-monospace, Menlo, monospace; }
+.ws-file > small {
+  color: var(--ink-faint);
+  font: var(--text-xs)/1.3 ui-monospace, Menlo, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ws-edit-count { margin-top: auto; color: var(--accent); font-size: var(--text-xs); }
+.ws-file::after {
+  content: "";
+  position: absolute;
+  left: 8px; right: 8px; top: 50%;
+  height: 1px;
+  background: var(--accent);
+  opacity: 0;
+  transform: translateY(-32px) scaleX(.25);
+}
+.ws-file.is-writing::after { animation: ws-scan 1.25s var(--ease) both; }
+.ws-file.is-loading { opacity: .62; pointer-events: none; }
+@keyframes ws-scan {
+  0% { opacity: 0; transform: translateY(-32px) scaleX(.25); }
+  18% { opacity: .85; }
+  100% { opacity: 0; transform: translateY(32px) scaleX(1); }
+}
+
+.ws-checkpoint {
+  position: relative;
+  z-index: 1;
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  min-height: 48px;
+  padding: 9px 13px;
+  border-top: 1px solid var(--line-soft);
+  color: var(--ink-dim);
+}
+.ws-checkpoint > i { width: 9px; height: 9px; flex: none; border: 1px solid currentColor; border-radius: 50%; }
+.ws-checkpoint span { display: grid; gap: 1px; }
+.ws-checkpoint b { font-size: var(--text-xs); font-weight: 600; }
+.ws-checkpoint small { color: var(--ink-faint); font: var(--text-xs)/1.2 ui-monospace, Menlo, monospace; }
+.ws-checkpoint.is-empty { color: var(--ink-faint); }
+.ws-checkpoint.is-live { color: var(--accent); }
+.ws-checkpoint.is-ok { color: var(--ok); }
+.ws-checkpoint.is-risk { color: var(--risk); }
+.ws-checkpoint.is-push > i { border-radius: 2px; transform: rotate(45deg); }
+
+/* ---------------------------------------------------------- exact replay */
+
+.ws-replay {
+  position: absolute;
+  z-index: 5;
+  inset: 0;
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  background: var(--bg-sunken);
+  animation: ws-replay-in var(--base) var(--ease) both;
+}
+.ws-replay[hidden] { display: none; }
+@keyframes ws-replay-in { from { opacity: 0; transform: translateY(5px); } to { opacity: 1; transform: none; } }
+.ws-replay > header,
+.ws-replay > nav { display: flex; align-items: center; gap: 7px; padding: 8px 11px; border-bottom: 1px solid var(--line-soft); }
+.ws-replay > header span { display: grid; gap: 1px; flex: 1; }
+.ws-replay > header b { font: 600 var(--text-sm)/1.2 ui-monospace, Menlo, monospace; }
+.ws-replay > header small { color: var(--ink-faint); font: var(--text-xs)/1.2 ui-monospace, Menlo, monospace; }
+.ws-replay-close { margin-left: auto; padding: 2px 7px; color: var(--ink-faint); background: transparent; font-size: var(--text-xl); }
+.ws-replay > nav button { padding: 4px 8px; color: var(--ink-dim); background: var(--bg-raised); border: 1px solid var(--line); font-size: var(--text-xs); }
+.ws-replay > nav button:disabled { opacity: .32; cursor: default; }
+.ws-replay > nav span { flex: 1; color: var(--accent); font: var(--text-xs)/1.2 ui-monospace, Menlo, monospace; text-align: center; }
+.ws-replay > nav .ws-replay-open { color: var(--m-work); border-color: color-mix(in oklab, var(--m-work) 36%, var(--line)); }
+.ws-diff { overflow: auto; padding: 7px 0 14px; font: var(--text-xs)/1.55 ui-monospace, Menlo, monospace; }
+.ws-diff-line { display: grid; grid-template-columns: 34px 34px 18px minmax(0, 1fr); min-height: 17px; }
+.ws-diff-line > i { padding-right: 7px; color: var(--ink-faint); font-style: normal; text-align: right; user-select: none; }
+.ws-diff-line > b { color: var(--ink-faint); font-weight: 500; text-align: center; user-select: none; }
+.ws-diff-line > code { padding: 0 12px 0 4px; color: var(--ink-dim); white-space: pre; }
+.ws-diff-line.is-add { background: color-mix(in oklab, var(--ok) 9%, transparent); }
+.ws-diff-line.is-add > b,
+.ws-diff-line.is-add > code { color: var(--ok); }
+.ws-diff-line.is-del { background: color-mix(in oklab, var(--risk) 8%, transparent); }
+.ws-diff-line.is-del > b,
+.ws-diff-line.is-del > code { color: var(--risk); }
+.ws-diff-line.is-gap > code { color: var(--ink-faint); font-style: italic; }
+
+@media (prefers-reduced-motion: reduce) {
+  .workshop.is-working .ws-robot-body,
+  .workshop.is-working .ws-arm,
+  .ws-file.is-writing::after { animation: none; }
+}
+
+@media (max-width: 760px) {
+  .ws-scene { grid-template-columns: 76px minmax(0, 1fr); }
+  .ws-files { grid-template-columns: 1fr; }
+}

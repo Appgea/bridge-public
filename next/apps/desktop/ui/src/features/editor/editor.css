@@ -1,0 +1,311 @@
+/* Editor chrome that belongs to the shared editor, not to any one host pane. Everything is
+   scoped to `.panel-editor`, the class `createCodeEditor` stamps on its host element. */
+
+.panel-editor .cm-editor { height: 100%; }
+
+/* Indentation is structure, not whitespace decoration. Each visible line carries one bounded
+   repeating rule that stops at its leading text. Tabs and spaces both resolve to columns. */
+.panel-editor .cm-indent-guided { position: relative; }
+.panel-editor .cm-indent-guided::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto 0 4px;
+  width: calc(var(--cm-indent-columns) * 1ch);
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    to right,
+    transparent 0 calc(var(--cm-indent-unit) * 1ch - 1px),
+    var(--cm-indent-guide) calc(var(--cm-indent-unit) * 1ch - 1px) calc(var(--cm-indent-unit) * 1ch)
+  );
+}
+
+/* Nested scope lines pin over the source, inside the content edge. They never move layout. */
+.panel-editor .cm-sticky-scroll {
+  position: absolute;
+  right: 84px;
+  z-index: 6;
+  overflow: hidden;
+  border-bottom: 1px solid var(--line);
+  background: var(--cm-editor-bg);
+  pointer-events: none;
+}
+.panel-editor .cm-sticky-scroll[hidden] { display: none; }
+.panel-editor .cm-sticky-row {
+  width: 100%;
+  height: 22px;
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px 0 4px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  pointer-events: auto;
+}
+.panel-editor .cm-sticky-row:hover {
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+  transform: none;
+}
+.panel-editor .cm-sticky-row > span {
+  color: var(--ink-faint);
+  font-size: var(--text-xs);
+  text-align: right;
+}
+.panel-editor .cm-sticky-row > code {
+  overflow: hidden;
+  color: inherit;
+  font: inherit;
+  text-overflow: ellipsis;
+  white-space: pre;
+}
+
+/* The minimap. A canvas pinned to the editor's right edge; its height is set from the
+   scroller by the plugin so it never overlaps a bottom panel. All painting is rAF-coalesced
+   blits of a cached offscreen — nothing here animates, so no motion rules apply. */
+.cm-minimap {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 72px;
+  z-index: 3;
+  cursor: pointer;
+  pointer-events: auto;
+}
+.cm-minimap:active { cursor: grabbing; }
+
+/* The minimap carries scroll position now; the native bar would be a second voice. */
+.panel-editor .cm-scroller { scrollbar-width: none; }
+.panel-editor .cm-scroller::-webkit-scrollbar { width: 0; height: 0; }
+
+/* Breakpoints sit in their own narrow gutter. The hit area is wider than the dot, while the
+   marker stays visually quiet until a line is armed. */
+.panel-editor .cm-breakpoint-gutter {
+  width: 16px;
+  cursor: pointer;
+}
+.panel-editor .cm-breakpoint-gutter .cm-gutterElement {
+  display: grid;
+  place-items: center;
+}
+.cm-breakpoint-dot {
+  display: block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--risk);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--risk) 64%, #000);
+}
+
+/* The jump target. The highlight is an overlay behind the glyphs whose OPACITY fades — the
+   text never dims, nothing reflows, and the eye is released after a beat. */
+.cm-flashLine { position: relative; }
+.cm-flashLine::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: var(--accent-soft);
+  border-left: 2px solid var(--accent);
+  opacity: 0;
+  animation: ed-flash 1100ms var(--ease) forwards;
+}
+@keyframes ed-flash {
+  0%   { opacity: 0.3; }
+  16%  { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+/* Where the program is STOPPED. Not a flash: it holds while the debugger is paused, so it has
+   to be readable next to a caret without pretending to be the selection. Amber and a left rule:
+   the one band of colour the buffer wears, and it means exactly one thing. */
+.cm-execLine { position: relative; }
+.cm-execLine::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background: color-mix(in oklab, var(--warn) 17%, transparent);
+  border-left: 2px solid var(--warn);
+}
+/* The paused value under the pointer. Name in ink, value in mono — the value is the answer,
+   the name is only there to prove the tooltip read what you meant. */
+.cm-valueTip {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  max-width: 46ch;
+  padding: 5px 9px;
+  font-size: var(--text-xs);
+}
+.cm-valueTip b { color: var(--ink-dim); font-weight: 600; }
+.cm-valueTip span {
+  color: var(--ink);
+  font-family: ui-monospace, Menlo, monospace;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* ------------------------------------------------- file-type glyphs */
+
+.ft-glyph {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  display: grid;
+  place-items: center;
+}
+.ft-glyph svg {
+  width: 14px;
+  height: 14px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.35;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.ft-glyph.is-folder svg { fill: currentColor; stroke: none; }
+
+/* Shape does the recognition work; restrained hues make repeated language groups scannable. */
+.ft-glyph.is-folder { color: color-mix(in oklab, var(--accent) 78%, var(--ink-dim)); }
+.ft-glyph.is-file { color: var(--ink-faint); }
+.ft-glyph.is-code { color: color-mix(in oklab, #38bdf8 62%, var(--ink-faint)); }
+.ft-glyph.is-ts { color: color-mix(in oklab, #3178c6 74%, var(--ink-dim)); }
+.ft-glyph.is-js { color: color-mix(in oklab, #e8c547 70%, var(--ink-dim)); }
+.ft-glyph.is-dart { color: color-mix(in oklab, #40c4ff 68%, var(--ink-dim)); }
+.ft-glyph.is-swift { color: color-mix(in oklab, #f05138 66%, var(--ink-faint)); }
+.ft-glyph.is-godot { color: color-mix(in oklab, #478cbf 70%, var(--ink-dim)); }
+.ft-glyph.is-rust { color: color-mix(in oklab, #f74c00 60%, var(--ink-faint)); }
+.ft-glyph.is-py { color: color-mix(in oklab, #3fb950 55%, var(--ink-faint)); }
+.ft-glyph.is-data { color: color-mix(in oklab, #d4a72c 62%, var(--ink-faint)); }
+.ft-glyph.is-config { color: color-mix(in oklab, #a78bfa 64%, var(--ink-faint)); }
+.ft-glyph.is-doc { color: color-mix(in oklab, var(--ink-dim) 70%, var(--ink-faint)); }
+.ft-glyph.is-markup { color: color-mix(in oklab, #e34f26 62%, var(--ink-faint)); }
+.ft-glyph.is-style { color: color-mix(in oklab, #c86dd7 58%, var(--ink-faint)); }
+.ft-glyph.is-image { color: color-mix(in oklab, #48a868 66%, var(--ink-faint)); }
+.ft-glyph.is-audio { color: color-mix(in oklab, #d66ad2 62%, var(--ink-faint)); }
+.ft-glyph.is-video,
+.ft-glyph.is-pdf { color: color-mix(in oklab, #e45858 64%, var(--ink-faint)); }
+.ft-glyph.is-database { color: color-mix(in oklab, #35b6a5 62%, var(--ink-faint)); }
+.ft-glyph.is-shell { color: color-mix(in oklab, #55b86c 60%, var(--ink-faint)); }
+.ft-glyph.is-package { color: color-mix(in oklab, #c99032 66%, var(--ink-faint)); }
+.ft-glyph.is-git { color: color-mix(in oklab, #f05032 64%, var(--ink-faint)); }
+.ft-glyph.is-lock { color: var(--ink-faint); }
+.ft-glyph.is-radio { color: color-mix(in oklab, var(--accent) 62%, var(--ink-faint)); }
+
+/* -------------------------------------------------- git change bars */
+
+/* A hairline column between the breakpoints and the line numbers. It has to be readable at a
+   glance and invisible when you are reading code, so it is 2px of colour and nothing else —
+   no background, no border, nothing that widens the gutter as you type. */
+.panel-editor .cm-change-gutter {
+  width: 3px;
+  padding: 0;
+  cursor: pointer;
+}
+.panel-editor .cm-change-gutter .cm-gutterElement {
+  display: grid;
+  place-items: stretch;
+  padding: 0;
+}
+.cm-change {
+  display: block;
+  width: 2px;
+  height: 100%;
+  border-radius: 1px;
+}
+/* Same meanings as the file tree: amber moved, green arrived, and a removal is a mark you can
+   see but not mistake for a line of yours. */
+.cm-change-modified { background: var(--warn); }
+.cm-change-added { background: var(--ok); }
+.cm-change-deleted {
+  height: 0;
+  align-self: start;
+  width: 0;
+  border-left: 3px solid var(--risk);
+  border-top: 3px solid transparent;
+  border-bottom: 3px solid transparent;
+  border-radius: 0;
+}
+
+/* Clicking a change bar opens the actual hunk beside it. The preview stays compact and keeps
+   repository text in text nodes. Stage and revert are the only verbs. */
+.panel-editor .cm-hunk-popover {
+  position: absolute;
+  z-index: 30;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  width: min(540px, calc(100% - 12px));
+  max-height: min(420px, calc(100% - 12px));
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--bg-raised);
+  color: var(--ink);
+  box-shadow: 0 16px 44px color-mix(in oklab, #000 34%, transparent);
+  font-family: var(--font-ui, system-ui, sans-serif);
+}
+.panel-editor .cm-hunk-popover > header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 36px;
+  padding: 6px 8px 6px 11px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.panel-editor .cm-hunk-popover > header > b { flex: 1; font-size: var(--text-xs); }
+.panel-editor .cm-hunk-popover > header > span { display: flex; gap: 5px; }
+.panel-editor .cm-hunk-popover button {
+  padding: 4px 8px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--bg-sunken);
+  color: var(--ink-dim);
+  font-size: var(--text-xs);
+}
+.panel-editor .cm-hunk-popover button:hover:not(:disabled) {
+  border-color: var(--accent);
+  color: var(--ink);
+  transform: none;
+}
+.panel-editor .cm-hunk-popover button.is-danger { color: var(--risk); }
+.panel-editor .cm-hunk-preview {
+  min-height: 0;
+  margin: 0;
+  overflow: auto;
+  padding: 5px 0;
+  background: var(--cm-editor-bg);
+  color: inherit;
+  font: var(--text-xs)/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.panel-editor .cm-hunk-row {
+  display: grid;
+  grid-template-columns: 34px 14px minmax(0, 1fr);
+  min-height: 17px;
+  padding: 0 9px 0 3px;
+}
+.panel-editor .cm-hunk-row > i {
+  color: var(--ink-faint);
+  font-style: normal;
+  text-align: right;
+}
+.panel-editor .cm-hunk-row > b { text-align: center; }
+.panel-editor .cm-hunk-row > code { overflow: hidden; font: inherit; white-space: pre; }
+.panel-editor .cm-hunk-row.is-add {
+  background: color-mix(in oklab, var(--ok) 11%, transparent);
+  color: color-mix(in oklab, var(--ok) 72%, var(--ink));
+}
+.panel-editor .cm-hunk-row.is-del {
+  background: color-mix(in oklab, var(--risk) 10%, transparent);
+  color: color-mix(in oklab, var(--risk) 70%, var(--ink));
+}
+.panel-editor .cm-hunk-note {
+  min-height: 25px;
+  padding: 6px 10px;
+  color: var(--ink-faint);
+  font-size: var(--text-xs);
+}

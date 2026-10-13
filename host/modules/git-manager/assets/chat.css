@@ -1,0 +1,110 @@
+/* git-manager module — owns the commit-graph render + the commit/push/merge chat animations.
+   Auto-loaded by Panel (module.json: chatAsset.css) alongside chat.js. Reuses a few page-level
+   vars (--line, --mut, --ink, --acc, --green, --panel, --red) and utility classes (.gempty, .gerr,
+   .bc-err) that the host page already defines — those are shared UI chrome, not git-specific. */
+
+/* commit graph (reusable: git tab rail + chat embeds) — gamified */
+.gitgraph{position:relative;font-size:13px}
+.gitgraph .gsvg{position:absolute;left:0;top:0;pointer-events:none;overflow:visible}
+.gedges{filter:drop-shadow(0 0 2px rgba(124,92,255,.25));opacity:0;animation:gedgein .5s ease .1s forwards}
+@keyframes gedgein{to{opacity:1}}
+.gedge{fill:none;stroke-width:2.5;stroke-linecap:round;stroke-dasharray:11 7;animation:gflow 1.05s linear infinite}
+@keyframes gflow{to{stroke-dashoffset:-18}}
+.gnode{cursor:pointer;pointer-events:auto;transform-box:fill-box;transform-origin:center;
+transition:transform .2s cubic-bezier(.34,1.7,.5,1);opacity:0;animation:mo-pop .42s cubic-bezier(.2,1.4,.4,1) both;animation-delay:var(--d,0s);--mo-from:.1;--mo-over:1.28}
+
+.gnode:hover{transform:scale(1.45)}
+.gring{fill:none;stroke-width:1.6;opacity:.55;pointer-events:none}
+.ghalo{pointer-events:none}
+.ghead-pulse{fill:none;stroke-width:2;pointer-events:none;transform-box:fill-box;transform-origin:center;animation:ghpulse 2s ease-out infinite}
+.ghead-pulse.b{animation-delay:1s}
+@keyframes ghpulse{0%{transform:scale(.6);opacity:.7}100%{transform:scale(2.6);opacity:0}}
+@media (prefers-reduced-motion:reduce){.gedge,.gnode,.gitgraph .grow,.ghead-pulse{animation:none!important}.gnode,.gitgraph .grow,.gedges{opacity:1}}
+.gitgraph .grow{position:relative;display:flex;align-items:center;height:64px;border-radius:10px;cursor:default;
+padding:0 20px 0 4px;gap:12px;opacity:0;animation:mo-rise .4s ease both;animation-delay:var(--d,0s)}
+
+.gitgraph .grow:hover{background:linear-gradient(90deg,rgba(124,92,255,.1),rgba(124,92,255,0))}
+.gitgraph .gbadge{flex:none;width:20px;height:20px;display:grid;place-items:center;font-size:15px;opacity:.9}
+.gitgraph .gtext{overflow:hidden;flex:1;min-width:0}
+.gitgraph .gsub{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--ink);font-weight:600;font-size:15px;letter-spacing:-.005em}
+.gitgraph .gmeta{font-size:11.5px;color:var(--mut);opacity:.72;margin-top:5px;font-variant-numeric:tabular-nums}
+/* code token: sha/paths — mono is the signal, no purple, no container */
+.gitgraph .gmeta .gsha{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--mut);transition:color .14s}
+.gitgraph .grow:hover .gsha{color:var(--ink)}
+/* keyword hint: invented data never gets a container — a whispered word, lane-tinted */
+.gitgraph .gkw{opacity:.6;font-style:italic}
+/* real ref: the ONLY pill on a row — squarish + mono + lane-colored = "git truth". right-aligned. */
+.gitgraph .grefs{flex:none;display:flex;gap:6px;align-items:center;margin-left:8px}
+.gref{display:inline-flex;align-items:center;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;
+font-weight:500;line-height:1;padding:4px 7px;border-radius:4px;border:1px solid;vertical-align:middle;cursor:pointer;
+color:var(--rc,#9fb6cc);border-color:color-mix(in oklab,var(--rc,#9fb6cc) 55%,transparent);background:color-mix(in oklab,var(--rc,#9fb6cc) 9%,transparent)}
+.gref:hover{background:color-mix(in oklab,var(--rc,#9fb6cc) 20%,transparent)}
+.gref.head{--rc:var(--green)}
+.gref.tag{--rc:#e3b341}
+/* chat-embed refs (no lane color var) keep a readable default */
+.gref.branch:not([style]){color:#9fb6cc;border-color:#3a4a5a}
+
+/* commit-node popover — checkout / copy sha / diff / discuss */
+.gpop{position:absolute;z-index:60;background:var(--panel);border:1px solid var(--line);border-radius:10px;
+box-shadow:0 10px 30px rgba(0,0,0,.5);padding:7px;display:flex;flex-direction:column;gap:3px;min-width:170px}
+.gpop .gpsha{font-family:ui-monospace,monospace;font-size:11px;color:var(--mut);padding:2px 7px}
+.gpop button{background:none;border:0;color:var(--ink);text-align:left;padding:6px 9px;border-radius:7px;font-size:13px;cursor:pointer}
+.gpop button:hover{background:#1b2330;color:var(--acc)}
+
+/* chat cards: commit / push / merge — same visual language, single-event scale */
+.bgit{border:1px solid var(--line);border-radius:11px;background:rgba(124,92,255,.04);padding:12px 14px;margin:8px 0}
+.bgit-commit{display:flex;align-items:center;gap:11px}
+.bgc-badge{flex:none;width:34px;height:34px;display:grid;place-items:center;border-radius:9px;font-size:16px;
+background:rgba(255,255,255,.04);border:1px solid var(--line);opacity:0;animation:mo-pop .4s cubic-bezier(.2,1.4,.4,1) .05s both}
+
+.bgc-body{min-width:0}
+.bgc-sub{font-weight:600;color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bgc-meta{font-size:11.5px;color:var(--mut);margin-top:2px}
+.bgc-meta code{color:#b9a6ff;background:rgba(124,92,255,.1);padding:0 5px;border-radius:5px}
+
+/* push: packet crosses twice, then everything settles — remote lights green, "done" chip lands.
+   Nothing loops: after ~2.6s the card is a still illustration of a completed push. */
+.bgit-push .bgp-row{display:flex;align-items:center;gap:10px;height:24px}
+.bgp-node{width:12px;height:12px;border-radius:50%;border:2px solid var(--line);background:#0d1117;flex:none}
+.bgp-node.remote{animation:bgriplite 1.1s 1.9s ease-out forwards}
+@keyframes bgriplite{0%{border-color:var(--line);box-shadow:0 0 0 0 rgba(63,185,80,.55)}100%{border-color:var(--green);box-shadow:0 0 0 9px rgba(63,185,80,0)}}
+.bgp-track{position:relative;flex:1;height:3px;border-radius:3px;background:linear-gradient(90deg,#26303c,#3a2f6b,#26303c);background-size:200% 100%;animation:mo-shimmer 1.1s linear 2}
+
+.bgp-pkt{position:absolute;top:-3px;left:0;width:9px;height:9px;border-radius:50%;background:var(--acc);box-shadow:0 0 8px var(--acc);animation:mo-flow 1.1s linear 2 forwards}
+
+.bgp-done{flex:none;margin-left:2px;font-size:11px;font-weight:700;letter-spacing:.02em;color:var(--green);opacity:0;animation:mo-pop .4s ease 2.2s both;--mo-from:.5;--mo-over:1.12}
+/* single-play "done" chip settle — shared by push + merge, holds its end state (no loop) */
+
+.bgp-label{font-size:12.5px;color:var(--mut);margin-top:9px}
+.bgp-label code{color:#b9a6ff}
+
+.bgit-merge .bgm-row{position:relative;height:34px}
+.bgm-line{position:absolute;left:0;width:70%;height:2px;background:var(--acc);border-radius:2px;opacity:.75;
+transform-origin:left center;animation:bgconverge .5s cubic-bezier(.3,1,.4,1) both}
+.bgm-line.a{top:6px;transform:rotate(0deg)}
+.bgm-line.b{top:26px;animation-delay:.08s}
+@keyframes bgconverge{0%{transform:rotate(var(--r0,0deg));opacity:0}100%{transform:rotate(var(--r1,0deg));opacity:.75}}
+.bgm-line.a{--r0:-6deg;--r1:6deg}
+.bgm-line.b{--r0:6deg;--r1:-6deg}
+.bgm-node{position:absolute;left:70%;top:16px;width:12px;height:12px;margin-top:-6px;border-radius:3px;background:var(--acc);
+transform:rotate(45deg);opacity:0;animation:mo-pop .35s cubic-bezier(.2,1.4,.4,1) .35s both}
+.bgm-done{position:absolute;left:calc(70% + 22px);top:9px;font-size:11px;font-weight:700;letter-spacing:.02em;color:var(--green);opacity:0;animation:mo-pop .4s ease .85s both;--mo-from:.5;--mo-over:1.12}
+.bgm-label{font-size:12.5px;color:var(--mut);margin-top:8px}
+.bgm-label code{color:#b9a6ff}
+@media (prefers-reduced-motion:reduce){
+ .bgc-badge,.bgp-track,.bgp-pkt,.bgp-node.remote,.bgm-line,.bgm-node,.bgp-done,.bgm-done{animation:none!important;opacity:1;transform:none}
+ .bgp-node.remote{border-color:var(--green)}
+}
+
+/* Companion panel scenes. The panel owns only the registry/mount; git owns every pixel here. */
+.pev.pg-git{position:relative;overflow:hidden;border:1px solid rgba(110,231,168,.2);border-radius:14px;
+ background:radial-gradient(circle at 86% 8%,rgba(110,231,168,.1),transparent 38%),linear-gradient(155deg,rgba(20,31,34,.96),rgba(14,18,24,.98));
+ box-shadow:0 10px 30px rgba(0,0,0,.2);padding:0}
+.pg-top{display:flex;align-items:center;gap:9px;padding:12px 12px 8px}.pg-top>div{min-width:0;flex:1}.pg-top b{display:block;color:#e8edf3;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.pg-top small{display:block;color:#778697;font:10px/1.4 ui-monospace,SFMono-Regular,Menlo,monospace;margin-top:2px}.pg-mark{width:30px;height:30px;border-radius:9px;display:grid;place-items:center;background:rgba(110,231,168,.1);color:#6ee7a8;font-size:18px}.pg-chip{font-size:9px;text-transform:uppercase;letter-spacing:.1em;color:#6ee7a8;border:1px solid rgba(110,231,168,.3);border-radius:4px;padding:4px 5px;opacity:0;animation:mo-pop .35s ease 1.55s both;--mo-from:.6;--mo-over:1.08}.pg-failed .pg-chip{color:#ff8f8f;border-color:rgba(255,110,110,.35)}
+.pg-route{height:95px;margin:2px 13px 0;display:grid;grid-template-columns:52px 1fr 52px;align-items:center;position:relative}.pg-node{display:flex;flex-direction:column;align-items:center;gap:5px;color:#7e8b9a;font:9px/1 ui-monospace,SFMono-Regular,Menlo,monospace;position:relative;z-index:2}.pg-node i{width:40px;height:40px;border-radius:12px;display:grid;place-items:center;font-style:normal;font-size:17px;background:#111820;border:1px solid #2c3944}.pg-node.remote i{color:#8bb4ff;box-shadow:0 0 20px rgba(139,180,255,.08)}.pg-node.local i{color:#6ee7a8;animation:pg-land 1.9s ease forwards}.pg-wire{height:2px;position:relative;margin:0 -3px 14px;background:linear-gradient(90deg,rgba(139,180,255,.28),rgba(110,231,168,.58));box-shadow:0 0 9px rgba(110,231,168,.13)}.pg-wire:before,.pg-wire:after{content:"";position:absolute;inset:-5px 0;border-top:1px solid rgba(139,180,255,.08)}.pg-wire:after{inset:6px 0 auto;border-color:rgba(110,231,168,.07)}.pg-packet{position:absolute;left:0;top:-3px;width:7px;height:7px;border-radius:2px;background:#8bb4ff;box-shadow:0 0 9px #8bb4ff;animation:pg-incoming 1.15s cubic-bezier(.3,.05,.2,1) both}.pg-packet.b{animation-delay:.22s}.pg-packet.c{animation-delay:.44s}
+@keyframes pg-incoming{0%{left:0;opacity:0;transform:rotate(0)}12%{opacity:1}88%{opacity:1}100%{left:calc(100% - 7px);opacity:0;transform:rotate(180deg)}}
+@keyframes pg-land{0%,70%{border-color:#2c3944;box-shadow:none}100%{border-color:#6ee7a8;box-shadow:0 0 0 7px rgba(110,231,168,0)}}
+.pg-phases{display:grid;grid-template-columns:repeat(3,1fr);gap:4px;padding:0 12px 11px}.pg-phases span{display:flex;align-items:center;gap:5px;color:#738091;text-transform:uppercase;letter-spacing:.07em;font-size:8px}.pg-phases i{width:5px;height:5px;border-radius:50%;background:#6ee7a8;box-shadow:0 0 6px #6ee7a8;opacity:0;animation:mo-pop .25s ease var(--pg-d) both;--mo-from:.2;--mo-over:1.3}
+.pg-result{border-top:1px solid rgba(255,255,255,.06);padding:9px 12px;display:flex;align-items:center;gap:7px;color:#aab7c5;font-size:10.5px;opacity:0;animation:mo-rise .35s ease 1.35s both;--mo-dist:4px}.pg-result i{width:17px;height:17px;border-radius:50%;display:grid;place-items:center;font-style:normal;background:rgba(110,231,168,.12);color:#6ee7a8;font-size:10px}.pg-result span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.pg-failed .pg-result i{background:rgba(255,110,110,.12);color:#ff8f8f}
+.pg-action{min-height:82px;display:flex;align-items:center;padding:12px!important;gap:10px}.pg-action-icon{width:40px;height:40px;display:grid;place-items:center;flex:none;border-radius:12px;background:rgba(110,231,168,.09);border:1px solid rgba(110,231,168,.2);color:#6ee7a8;font-size:18px;opacity:0;animation:mo-pop .38s ease .05s both}.pg-action-copy{min-width:0;flex:1}.pg-action-copy small{display:block;color:#6ee7a8;text-transform:uppercase;letter-spacing:.1em;font-size:8px}.pg-action-copy b,.pg-action-copy span{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.pg-action-copy b{color:#e5eaf1;margin:3px 0;font-size:12.5px}.pg-action-copy span{color:#74808f;font-size:10px}.pg-action-done{font-style:normal;color:#6ee7a8;opacity:0;animation:mo-pop .3s ease .45s both}
+@media(prefers-reduced-motion:reduce){.pg-chip,.pg-node.local,.pg-packet,.pg-phases i,.pg-result,.pg-action-icon,.pg-action-done{animation:none!important;opacity:1}.pg-node.local i{border-color:#6ee7a8}}

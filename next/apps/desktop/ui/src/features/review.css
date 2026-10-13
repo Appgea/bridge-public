@@ -1,0 +1,452 @@
+/**
+ * Review — what the agents made. A reading screen like Support: tokens only, one column of
+ * batches, the media itself as the content. Images are a grid you scan; sounds are a list you play.
+ */
+
+.review[hidden] { display: none; }
+
+.review {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+  background: var(--bg);
+}
+
+.rv-top {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 18px 24px 14px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.rv-heading { flex: 1; min-width: 0; }
+.rv-heading h1 { margin: 0; color: var(--ink); font-size: var(--text-lg); font-weight: 700; }
+.rv-heading p { margin: 3px 0 0; color: var(--ink-dim); font-size: var(--text-sm); }
+
+/* max-content rows: the global `min-height: 0` lets a fixed-height grid squeeze its auto rows, so
+   once the batches outgrow the screen every card collapses to its padding instead of scrolling. */
+.rv-body {
+  display: grid;
+  grid-auto-rows: max-content;
+  align-content: start;
+  gap: 14px;
+  padding: 16px 24px 32px;
+  overflow-y: auto;
+}
+
+.rv-btn {
+  padding: 5px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--bg-raised);
+  color: var(--ink-dim);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  white-space: nowrap;
+}
+.rv-btn:hover { color: var(--ink); border-color: color-mix(in oklab, var(--ink) 25%, var(--line)); }
+.rv-btn.is-primary { border-color: transparent; background: var(--accent); color: var(--on-accent); }
+.rv-btn.is-primary:hover { color: var(--on-accent); filter: brightness(1.08); }
+.rv-btn.is-quiet { border-color: transparent; background: transparent; }
+
+.rv-undo {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 8px 8px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg-raised);
+  color: var(--ink-dim);
+  font-size: var(--text-sm);
+}
+.rv-undo span { flex: 1; }
+
+.rv-batch {
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--bg-raised);
+}
+/* New since you last looked: the accent edge, nothing louder. */
+.rv-batch.is-new { box-shadow: inset 3px 0 0 var(--accent); }
+
+.rv-head { display: flex; align-items: flex-start; gap: 12px; }
+.rv-title { flex: 1; min-width: 0; display: grid; gap: 2px; }
+.rv-title b { color: var(--ink); font-size: var(--text-lg); }
+.rv-title span { color: var(--ink-dim); font-size: var(--text-sm); }
+.rv-where {
+  overflow: hidden;
+  color: var(--ink-faint);
+  font: var(--text-xs) ui-monospace, Menlo, monospace;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rv-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+
+.rv-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 10px;
+}
+.rv-shot {
+  display: grid;
+  gap: 6px;
+  padding: 6px;
+  border: 1px solid var(--line-soft);
+  border-radius: 9px;
+  background: var(--bg-sunken);
+  cursor: zoom-in;
+  text-align: left;
+}
+.rv-shot:hover { border-color: var(--accent); }
+.rv-shot.is-audio,
+.rv-shot.is-video,
+.rv-shot.is-more,
+.rv-shot.is-folder { grid-template-rows: 1fr auto; cursor: pointer; }
+.rv-glyph {
+  display: grid;
+  place-items: center;
+  height: 120px;
+  border-radius: 5px;
+  background: linear-gradient(140deg, color-mix(in oklab, var(--accent) 22%, var(--bg-sunken)), var(--bg-sunken));
+  color: var(--accent);
+  font-size: 34px;
+}
+/* A folded folder reads as a stack: a second edge behind the tile and the file count on top. */
+.rv-shot.is-folder { position: relative; box-shadow: 4px 4px 0 -1px var(--bg-sunken), 4px 4px 0 0 var(--line-soft); }
+.rv-stack {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  padding: 1px 7px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: var(--text-xs);
+  font-weight: 600;
+}
+.rv-shot.is-more .rv-glyph { background: none; font-size: 26px; font-weight: 600; }
+.rv-shot img {
+  width: 100%;
+  height: 120px;
+  object-fit: contain;
+  border-radius: 5px;
+  background: repeating-conic-gradient(var(--line-soft) 0 25%, transparent 0 50%) 0 0 / 16px 16px;
+}
+.rv-name {
+  overflow: hidden;
+  color: var(--ink-dim);
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rv-shot.is-missing img { visibility: hidden; }
+.rv-shot.is-missing .rv-name::after { content: " · file is gone"; color: var(--risk); }
+
+.rv-empty {
+  place-self: center;
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  margin-top: 80px;
+  padding: 24px 28px;
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+  color: var(--ink-dim);
+  text-align: center;
+}
+.rv-empty b { color: var(--ink); font-size: var(--text-lg); }
+.rv-empty p { margin: 0; font-size: var(--text-sm); }
+
+/* ------------------------------------------------------------------ peek */
+
+/* New work, in the corner: the pictures themselves and one button. Bottom left, clear of every
+   terminal's own corner badges on the right. */
+.rv-peek {
+  position: fixed;
+  left: 18px;
+  bottom: 18px;
+  z-index: 900;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 10px 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--bg-raised);
+  box-shadow: 0 18px 50px rgb(0 0 0 / 0.35);
+  animation: rv-peek-in 260ms var(--ease) both;
+}
+.rv-peek.is-leaving { animation: rv-peek-out 180ms ease-in both; }
+@keyframes rv-peek-in { from { opacity: 0; transform: translateY(14px) scale(0.98); } }
+@keyframes rv-peek-out { to { opacity: 0; transform: translateY(10px); } }
+@media (prefers-reduced-motion: reduce) { .rv-peek, .rv-peek.is-leaving { animation: none; } }
+
+.rv-peek-faces { display: flex; }
+.rv-peek-face {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin-left: -12px;
+  overflow: hidden;
+  border: 2px solid var(--bg-raised);
+  border-radius: 10px;
+  background: var(--bg-sunken);
+  color: var(--accent);
+  font-size: var(--text-xl);
+}
+.rv-peek-face:first-child { margin-left: 0; }
+.rv-peek-face img { width: 100%; height: 100%; object-fit: cover; }
+.rv-peek-text { display: grid; gap: 1px; min-width: 0; max-width: 220px; }
+.rv-peek-text b { overflow: hidden; color: var(--ink); font-size: var(--text-md); text-overflow: ellipsis; white-space: nowrap; }
+.rv-peek-text span { color: var(--ink-dim); font-size: var(--text-sm); }
+.rv-peek-close {
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--ink-faint);
+  font-size: var(--text-lg);
+}
+.rv-peek-close:hover { color: var(--ink); background: color-mix(in oklab, var(--ink) 8%, transparent); }
+
+/* ------------------------------------------------------------------ deck */
+
+/* A viewing room: dark in both themes, because pictures are judged on a neutral dark field and
+   the app's chrome has no business competing with them. */
+.rd-veil {
+  --rd-ink: #eef1f7;
+  --rd-dim: #9aa3b5;
+  --rd-line: rgb(255 255 255 / 0.1);
+  --rd-good: #5fd99a;
+  --rd-change: #f2b84b;
+  position: fixed;
+  inset: 0;
+  z-index: 2147482000;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  background: rgb(7 9 14 / 0.94);
+  backdrop-filter: blur(18px) saturate(0.6);
+  -webkit-backdrop-filter: blur(18px) saturate(0.6);
+  color: var(--rd-ink);
+  outline: none;
+  animation: rd-in 200ms var(--ease) both;
+}
+@keyframes rd-in { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) { .rd-veil { animation: none; } }
+
+.rd-top { display: flex; align-items: center; gap: 14px; padding: 14px 18px; }
+.rd-where { flex: 1; min-width: 0; font-size: var(--text-lg); }
+.rd-count { color: var(--rd-dim); font-size: var(--text-sm); font-variant-numeric: tabular-nums; }
+.rd-close {
+  width: 32px;
+  height: 32px;
+  border: 1px solid var(--rd-line);
+  border-radius: 50%;
+  background: transparent;
+  color: var(--rd-ink);
+  font-size: var(--text-xl);
+}
+
+.rd-stage {
+  display: grid;
+  grid-template-columns: 56px minmax(0, 1fr) 56px;
+  align-items: center;
+  min-height: 0;
+  padding: 0 8px;
+}
+.rd-nav {
+  width: 44px;
+  height: 64px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--rd-dim);
+  font-size: 34px;
+}
+.rd-nav:hover:not(:disabled) { color: var(--rd-ink); background: rgb(255 255 255 / 0.06); }
+.rd-nav:disabled { opacity: 0.2; }
+.rd-frame {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  min-height: 0;
+}
+.rd-image {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 6px;
+  box-shadow: 0 30px 80px rgb(0 0 0 / 0.5);
+}
+.rd-video { max-width: 100%; max-height: 100%; border-radius: 8px; background: #000; }
+.rd-frame.is-missing::after { content: "This file is no longer on disk."; color: var(--rd-dim); }
+.rd-frame.is-missing > * { display: none; }
+
+.rd-audio {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 18px;
+  width: min(760px, 100%);
+  padding: 22px 24px;
+  border: 1px solid var(--rd-line);
+  border-radius: 18px;
+  background: rgb(255 255 255 / 0.04);
+}
+.rd-audio audio { display: none; }
+.rd-play {
+  position: relative;
+  width: 56px;
+  height: 56px;
+  border: 0;
+  border-radius: 50%;
+  background: var(--accent);
+}
+.rd-play::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 0;
+  height: 0;
+  border-left: 16px solid #fff;
+  border-top: 10px solid transparent;
+  border-bottom: 10px solid transparent;
+  transform: translateX(2px);
+}
+.rd-play.is-playing::before {
+  width: 14px;
+  height: 18px;
+  border: 0;
+  background: linear-gradient(90deg, #fff 0 5px, transparent 5px 9px, #fff 9px);
+  transform: none;
+}
+.rd-wave {
+  width: 100%;
+  height: 64px;
+  cursor: pointer;
+  --wave-played: #b3a6ff;
+  --wave-rest: #3a4258;
+}
+.rd-time { color: var(--rd-dim); font-size: var(--text-sm); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.rd-audio.is-missing::after { content: "This file is no longer on disk."; grid-column: 1 / -1; color: var(--rd-dim); }
+
+.rd-dock { display: grid; justify-items: center; gap: 12px; padding: 10px 18px 16px; }
+.rd-caption { color: var(--rd-dim); font: var(--text-sm) ui-monospace, Menlo, monospace; }
+.rd-verdicts { display: flex; gap: 10px; }
+.rd-verdicts[hidden], .rd-note[hidden], .rd-strip[hidden] { display: none; }
+.rd-verdict {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px 9px 18px;
+  border: 1px solid var(--rd-line);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.04);
+  color: var(--rd-ink);
+  font-size: var(--text-md);
+  font-weight: 650;
+  transition: background var(--fast) var(--ease), border-color var(--fast) var(--ease), transform var(--fast) var(--ease);
+}
+.rd-verdict kbd {
+  padding: 1px 6px;
+  border: 1px solid var(--rd-line);
+  border-radius: 5px;
+  color: var(--rd-dim);
+  font: var(--text-xs) ui-monospace, Menlo, monospace;
+}
+.rd-verdict.is-good:hover, .rd-verdict.is-good.is-on { border-color: var(--rd-good); background: rgb(95 217 154 / 0.14); }
+.rd-verdict.is-change:hover, .rd-verdict.is-change.is-on { border-color: var(--rd-change); background: rgb(242 184 75 / 0.14); }
+.rd-verdict.is-on { transform: scale(1.04); }
+.rd-note input {
+  width: min(560px, 80vw);
+  padding: 10px 16px;
+  border: 1px solid var(--rd-change);
+  border-radius: 999px;
+  background: rgb(255 255 255 / 0.05);
+  color: var(--rd-ink);
+  font: inherit;
+  font-size: var(--text-md);
+  outline: none;
+}
+.rd-note input:focus { border-color: var(--rd-ink); }
+
+.rd-strip {
+  display: flex;
+  gap: 8px;
+  max-width: 100%;
+  padding: 4px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.rd-thumb {
+  position: relative;
+  flex: none;
+  width: 64px;
+  height: 46px;
+  padding: 0;
+  overflow: hidden;
+  border: 2px solid transparent;
+  border-radius: 8px;
+  background: rgb(255 255 255 / 0.06);
+  opacity: 0.55;
+  transition: opacity var(--fast) var(--ease), border-color var(--fast) var(--ease);
+}
+.rd-thumb:hover { opacity: 0.85; }
+.rd-thumb.is-current { border-color: var(--rd-ink); opacity: 1; }
+.rd-thumb img { width: 100%; height: 100%; object-fit: cover; }
+.rd-thumb-glyph { color: var(--rd-dim); font-size: var(--text-xl); }
+.rd-mark {
+  position: absolute;
+  right: 3px;
+  bottom: 3px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+.rd-thumb.is-good .rd-mark { background: var(--rd-good); }
+.rd-thumb.is-change .rd-mark { background: var(--rd-change); }
+
+.rd-summary {
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  width: min(620px, 100%);
+  text-align: center;
+  animation: rd-in 240ms var(--ease) both;
+}
+.rd-summary-title { font-size: var(--text-2xl); }
+.rd-summary p { margin: 0; color: var(--rd-dim); font-size: var(--text-md); }
+.rd-feedback {
+  width: 100%;
+  max-height: 34vh;
+  margin: 6px 0 0;
+  padding: 14px 16px;
+  overflow: auto;
+  border: 1px solid var(--rd-line);
+  border-radius: 12px;
+  background: rgb(255 255 255 / 0.04);
+  color: var(--rd-ink);
+  font: var(--text-sm)/1.6 ui-monospace, Menlo, monospace;
+  text-align: left;
+  white-space: pre-wrap;
+}
+.rd-summary-actions { display: flex; gap: 10px; margin-top: 6px; }
+.rd-btn {
+  padding: 9px 18px;
+  border: 1px solid var(--rd-line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--rd-ink);
+  font-size: var(--text-md);
+  font-weight: 650;
+}
+.rd-btn.is-primary { border-color: transparent; background: var(--accent); color: #fff; }
+.rd-btn:disabled { opacity: 0.7; }

@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "reply": {
+      "type": "string",
+      "description": "Concise answer to the human, grounded only in the supplied Panel ledger."
+    },
+    "actions": {
+      "type": "array",
+      "maxItems": 4,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "type": {
+            "type": "string",
+            "enum": [
+              "open_home",
+              "open_inbox",
+              "open_runs",
+              "open_terminals",
+              "open_project",
+              "start_agent",
+              "start_sim",
+              "focus_sim",
+              "prompt_agent",
+              "focus_session",
+              "stop_session"
+            ]
+          },
+          "project": { "type": ["string", "null"] },
+          "session": { "type": ["string", "null"] },
+          "agent": {
+            "type": ["string", "null"],
+            "enum": ["claude", "codex", "grok", "kimi", "glm", "opencode", null]
+          },
+          "prompt": { "type": ["string", "null"] },
+          "reason": { "type": ["string", "null"] },
+          "view": {
+            "type": ["string", "null"],
+            "enum": [
+              "dash",
+              "files",
+              "git",
+              "product-spine",
+              "release",
+              "revenuecat",
+              "analytics",
+              null
+            ]
+          }
+        },
+        "required": ["type", "project", "session", "agent", "prompt", "reason", "view"]
+      }
+    }
+  },
+  "required": ["reply", "actions"]
+}

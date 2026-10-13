@@ -1,0 +1,40 @@
+{
+  "_note": "Allocation ledger for Panel animations. Every animation has a stable, NAMESPACED id `<namespace>:<name>`. `core:*` is the reserved well-known block implemented in web/dash/motion.css (one `@keyframes mo-<name>` + `.mo-<name>` class each), loaded once by dashboard.html so it resolves on every surface. This is the motion analog of protocol.json: core defines the reserved block, and anyone else — a module, a person, or the agent — allocates within their OWN namespace. A module never redefines a shared keyframe; it reuses core:* or mints its own.",
+  "principle": "Motion encodes a fact, never decoration. Every id maps to one meaning; if a proposed animation can't name the fact it shows, it doesn't ship. Living state may loop (spin/shimmer/pulse/flow-while-active); discrete events play once and settle (pop/rise/finite flow).",
+  "allocation": {
+    "scheme": "id = `<namespace>:<name>`. The name is a stable handle — retune the motion freely, but never rename/renumber an id (references break).",
+    "namespaces": "core = this reserved file. Every module owns the namespace equal to its module.json `name` (git-manager:*, release-manager:*). A person or agent owns any namespace they coin. You may mint any name inside YOUR namespace at any time — no central sign-off, no collisions across namespaces.",
+    "reference": "consumers declare intent in module.json `animations: {uses, owns}`. `uses` = core:* ids reused (physical class .mo-<name>). `owns` = ids in the module's own namespace, implemented in that module's chatAsset.css.",
+    "promote": "when the SAME motion is reused across ≥2 namespaces, it graduates into core:* — added here as a new reserved primitive + `.mo-<name>` in motion.css, and each prior owner flips its `owns` entry to a `uses` of the new core id. This is the reuse-opportunity ('fırsat') trigger; it is small, reversible, in-plan work — the agent performs it autonomously when it spots the duplication.",
+    "css_map": "core:<name> ↔ @keyframes mo-<name> + .mo-<name> (params on --mo-*). Owned ids keep their existing module classes; the id is the registry identity, the class is the CSS handle."
+  },
+  "primitives": [
+    {"id": "core:spin", "class": "mo-spin", "means": "something is working", "loops": true,
+     "params": {"--mo-dur": ".8s", "--mo-count": "infinite"},
+     "replaced": ["core: spin, aspin", "release-manager: rlspin", "+ core .lvspin (was cross-borrowing rlspin)"]},
+    {"id": "core:pop", "class": "mo-pop", "means": "this just appeared / landed — a point event", "loops": false,
+     "params": {"--mo-dur": ".4s", "--mo-from": ".3", "--mo-over": "1.15", "--mo-ease": "spring", "--mo-delay": "0s"},
+     "replaced": ["core: unreadpop, apop", "git-manager: gpop, bgpop, bgdone"]},
+    {"id": "core:rise", "class": "mo-rise", "means": "a new item entered the view", "loops": false,
+     "params": {"--mo-dur": ".3s", "--mo-dist": "7px", "--mo-ease": "ease-out-ish", "--mo-delay": "0s"},
+     "replaced": ["core: msgin, arise", "git-manager: grise", "release-manager: rlrise"]},
+    {"id": "core:flow", "class": "mo-flow", "means": "a packet is transferring along a track",
+     "loops": "infinite while active, or a finite count for one send",
+     "params": {"--mo-dur": "1.1s", "--mo-count": "infinite | N"},
+     "needs": "a position:relative track + an absolutely-placed packet the caller styles",
+     "replaced": ["core: flow (git rail)", "git-manager: bgflow (push card)"],
+     "note": "headline cross-namespace primitive: the Pulse git-rail transfer and the git push CARD are now the same motion."},
+    {"id": "core:shimmer", "class": "mo-shimmer", "means": "a track/text is loading or is the live heartbeat", "loops": true,
+     "params": {"--mo-dur": "1.1s", "--mo-count": "infinite"}, "needs": "background-size (e.g. 200% 100%) on the target",
+     "replaced": ["core: shimmer (had TWO conflicting defs — now one)", "git-manager: bgshimmer"]},
+    {"id": "core:pulse", "class": "mo-pulse", "means": "alive / you are here", "loops": true,
+     "params": {"--mo-dur": "1.4s", "--mo-mid": ".4", "--mo-count": "infinite"},
+     "replaced": ["core: pulse (.live), jpp (jump-pill dot)"]}
+  ],
+  "owned": {
+    "_note": "Single-namespace bespoke motions — allocated in their owner's namespace, implemented in the owner's own CSS, NOT reserved. Listed for visibility so the exclusion is a decision. Promotes to core:* only on ≥2-namespace reuse.",
+    "core": ["core:zappulse", "core:node-pulse", "core:ripple", "core:wolf", "core:momentum", "core:braille", "core:caret", "core:fade", "core:dots", "core:lightbox-in"],
+    "git-manager": ["git-manager:march", "git-manager:edge-in", "git-manager:head-pulse", "git-manager:converge", "git-manager:landed"],
+    "release-manager": ["release-manager:packet", "release-manager:cloud", "release-manager:ring"]
+  }
+}

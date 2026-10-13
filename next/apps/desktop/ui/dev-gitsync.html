@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Pull all / Push all — dev harness</title>
+    <script>
+      const forced = new URLSearchParams(location.search).get("theme");
+      document.documentElement.dataset.theme = forced === "light" ? "light" : "dark";
+    </script>
+  </head>
+  <body>
+    <div id="stage"></div>
+    <script type="module" src="/src/dev_gitsync.ts"></script>
+  </body>
+</html>

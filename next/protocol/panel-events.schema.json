@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://appgea.dev/panel/events.schema.json",
+  "title": "Panel event envelope",
+  "type": "object",
+  "required": ["kind"],
+  "properties": {
+    "kind": {
+      "enum": [
+        "session_started",
+        "agent_text",
+        "agent_status",
+        "activity",
+        "file_changed",
+        "permission_requested",
+        "visual_requested",
+        "turn_finished",
+        "error"
+      ]
+    },
+    "session_id": { "type": ["string", "null"] }
+  },
+  "additionalProperties": true
+}

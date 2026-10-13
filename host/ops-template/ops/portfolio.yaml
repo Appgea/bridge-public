@@ -1,0 +1,27 @@
+# The spine. One keyed row per product. Single source of truth.
+# CPO: fill `status` and the unknown fields on first `/cpo review` of each app.
+#
+# schema per entry:
+#   name:        human name
+#   dir:         folder name under your projects root
+#   kind:        flutter-app | ios-native | godot-game | social | website | tool | server
+#   status:      idea | building | review | live | paused | archived | unknown
+#   stores:      { ios, android }   # app store / play urls or ids, null if N/A
+#   bundle_id:   reverse-dns id, null if N/A
+#   monetization: [admob, iap, paypal, none]   # how it makes money
+#   revenuecat:  project/offering id, null if no subs
+#   depends_on:  [keys]   # shared services/apps this one needs (e.g. a game -> its server)
+#   serves:      [keys]   # for a shared service: which apps it backs (per-consumer context)
+#   notes:       one line
+#
+# Dependency edges align context: working on an app with `depends_on` also loads that service's
+# matching per-consumer slice; a service change loads each served app.
+
+# What the company is actively pushing right now — 1–3 app keys, ranked.
+# LLM-DRAFTED, human-confirmed: the CPO proposes/refreshes this from real signals
+# (revenue, live status + momentum, open P0/P1, staleness) during `/cpo review all` and
+# `/cpo verdict`; the human confirms or overrides (a direction call — P-02). Keys must exist
+# under `apps:`. `/cpo` leads with this; review/verdict rank these first. Empty until first review.
+focus: []
+
+apps: {}

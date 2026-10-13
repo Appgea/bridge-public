@@ -1,0 +1,860 @@
+/* Git as one spine of time. Three regions: Next Move on top, the Spine on the left, Focus on
+ * the right, a thin safety bar below. Everything reads top to bottom. Tokens only, so the light
+ * theme gets the same screen. */
+
+.git-pane {
+  --git: var(--m-git);
+  --spine-w: clamp(260px, 32%, 400px);
+  --unsent: var(--git);
+  --incoming: #6fa4ff;
+  --ghost: color-mix(in oklab, var(--incoming) 55%, var(--ink-faint));
+  display: block;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--ink);
+  outline: none;
+}
+.git-shell { height: 100%; display: flex; flex-direction: column; }
+
+/* ---------------------------------------------------------------- shared bits */
+
+.git-pane .gbtn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--bg-raised);
+  color: var(--ink-dim);
+  padding: 5px 9px;
+  font-size: var(--text-xs);
+  line-height: 1.2;
+}
+.git-pane .gbtn:hover { transform: none; border-color: color-mix(in oklab, var(--git) 50%, transparent); color: var(--git); }
+.git-pane .gbtn.mini { padding: 3px 7px; font-size: var(--text-xs); }
+.git-pane .gbtn.icon-only { display: grid; place-items: center; width: 26px; height: 26px; padding: 0; }
+.git-pane .gbtn.icon-only .ui-icon { width: 13px; height: 13px; }
+.git-pane .gbtn.prim {
+  border-color: color-mix(in oklab, var(--git) 70%, black);
+  background: var(--git);
+  color: var(--on-accent, #fff);
+  font-weight: 600;
+}
+.git-pane .gbtn.prim:hover { background: color-mix(in oklab, var(--git) 85%, white); color: var(--on-accent, #fff); }
+.git-pane .gbtn.big { min-height: 34px; padding: 7px 14px; font-size: var(--text-sm); }
+.git-pane .gbtn.danger { border-color: color-mix(in oklab, var(--risk) 40%, transparent); background: color-mix(in oklab, var(--risk) 8%, transparent); color: var(--risk); }
+.git-pane .gbtn.danger:hover { border-color: var(--risk); color: var(--risk); }
+.git-pane .gbtn.agent {
+  border-color: color-mix(in oklab, var(--accent) 44%, var(--line));
+  background: color-mix(in oklab, var(--accent) 14%, var(--bg-raised));
+  color: color-mix(in oklab, var(--accent) 76%, var(--ink));
+  font-weight: 600;
+}
+.git-pane .gbtn.agent .ui-icon { width: 14px; height: 14px; }
+.git-pane .gbtn:disabled { opacity: 0.35; cursor: default; }
+.git-pane .gbtn:disabled:hover { border-color: var(--line); color: var(--ink-dim); }
+.git-pane kbd {
+  margin-left: 8px;
+  padding: 1px 5px;
+  border: 1px solid color-mix(in oklab, currentColor 30%, transparent);
+  border-radius: 4px;
+  font: var(--text-xs)/1.3 ui-monospace, Menlo, monospace;
+  opacity: 0.7;
+}
+.gerr { min-height: 0; margin-top: 7px; color: var(--risk); font-size: var(--text-xs); }
+.gerr:empty { display: none; }
+
+/* Git writes lock their actions, while browsing and project navigation stay available. */
+.git-project-view { height: 100%; }
+.git-activity {
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 7px 14px;
+  background: color-mix(in oklab, var(--git) 10%, var(--bg));
+  color: var(--ink);
+  font-size: var(--text-sm);
+}
+.git-activity[hidden] { display: none; }
+.git-activity.is-error { color: var(--risk); }
+.git-loading { padding: 16px; color: var(--ink-dim); font-size: var(--text-sm); }
+.git-loading-lines { display: grid; gap: 12px; margin-top: 18px; }
+.git-loading-lines i {
+  display: block;
+  height: 10px;
+  max-width: 360px;
+  border-radius: 3px;
+  background: var(--line);
+  animation: mo-pulse 1.4s ease-in-out infinite;
+}
+.git-loading-lines i:nth-child(2) { width: 78%; }
+.git-loading-lines i:nth-child(3) { width: 54%; }
+.expanded-file { content-visibility: auto; contain-intrinsic-size: auto 220px; }
+
+/* who did it: a robot mark or a dot */
+.who {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  font-style: normal;
+  font-size: var(--text-xs);
+}
+.who.is-agent { background: color-mix(in oklab, var(--accent) 18%, transparent); color: var(--accent); }
+.who.is-agent .ui-icon { width: 11px; height: 11px; }
+.who.is-you { color: var(--git); font-size: var(--text-xs); }
+.who.is-unknown { color: var(--ink-faint); }
+.who.is-conflict { background: color-mix(in oklab, var(--risk) 18%, transparent); color: var(--risk); font-weight: 800; }
+
+.file-code {
+  flex: none;
+  display: inline-grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  background: color-mix(in oklab, var(--ink) 7%, transparent);
+  color: var(--ink-dim);
+  font: 600 var(--text-xs)/1 ui-monospace, Menlo, monospace;
+  font-style: normal;
+}
+.is-untracked .file-code { color: var(--incoming); }
+.is-staged .file-code { color: var(--git); }
+.is-conflict .file-code { background: color-mix(in oklab, var(--risk) 16%, transparent); color: var(--risk); }
+
+/* ---------------------------------------------------------------- next move */
+
+.git-move {
+  flex: 0 0 auto;
+  min-height: 54px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-raised);
+}
+.move-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--text-lg);
+  font-weight: 560;
+  letter-spacing: -0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.move-text span { overflow: hidden; text-overflow: ellipsis; }
+.move-dot { flex: none; width: 9px; height: 9px; border-radius: 50%; background: var(--ink-faint); }
+.move-text[data-tone="stuck"] .move-dot { background: var(--risk); box-shadow: 0 0 10px color-mix(in oklab, var(--risk) 60%, transparent); }
+.move-text[data-tone="work"] .move-dot { background: var(--warn); }
+.move-text[data-tone="sync"] .move-dot { background: var(--incoming); }
+.move-text[data-tone="calm"] .move-dot { background: var(--git); }
+.move-text[data-tone="wait"] .move-dot { background: var(--accent); animation: mo-pulse 1.4s ease-in-out infinite; }
+.move-go {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 6px 16px;
+  border: 1px solid color-mix(in oklab, var(--git) 70%, black);
+  border-radius: 9px;
+  background: var(--git);
+  color: var(--on-accent, #fff);
+  font-size: var(--text-md);
+  font-weight: 650;
+}
+.move-go:hover { transform: none; background: color-mix(in oklab, var(--git) 85%, white); }
+.move-text[data-tone="stuck"] + .move-go { background: var(--risk); border-color: color-mix(in oklab, var(--risk) 70%, black); }
+.move-text[data-tone="sync"] + .move-go { background: var(--incoming); border-color: color-mix(in oklab, var(--incoming) 70%, black); }
+.move-where { flex: none; display: inline-flex; align-items: center; gap: 6px; margin-left: 6px; }
+.where-repo,
+.where-branch {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 9px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink-dim);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+.where-repo:hover, .where-branch:hover { transform: none; border-color: var(--line); color: var(--ink); }
+.where-branch { color: var(--git); background: color-mix(in oklab, var(--git) 10%, transparent); }
+.where-branch .ui-icon { width: 12px; height: 12px; }
+.repo-pick {
+  background: var(--bg);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 4px 7px;
+  font: inherit;
+  font-size: var(--text-sm);
+}
+
+.git-project-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+  color: var(--ink-faint);
+  font-size: var(--text-xs);
+}
+.project-pick { max-width: 180px; }
+.project-pick:focus-visible { outline: 2px solid var(--git); outline-offset: 2px; }
+.project-pick:disabled { opacity: 0.5; cursor: wait; }
+
+/* ---------------------------------------------------------------- body grid */
+
+.git-body {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: var(--spine-w) minmax(0, 1fr);
+  overflow: hidden;
+}
+
+/* ---------------------------------------------------------------- spine */
+
+.git-spine {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border-right: 1px solid var(--line);
+  background: var(--bg);
+}
+.spine-head {
+  flex: none;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 10px 16px 6px;
+  font-size: var(--text-xs);
+}
+.spine-head b { color: var(--ink-dim); font-weight: 650; }
+.spine-head span { color: var(--ink-faint); }
+.spine-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  overscroll-behavior: contain;
+  padding: 0 12px 36px 0;
+}
+.spine-section { position: relative; padding-left: 30px; }
+/* the line itself */
+.spine-section::before {
+  content: "";
+  position: absolute;
+  left: 19px;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background: color-mix(in oklab, var(--ink) 10%, transparent);
+}
+.spine-section.is-waiting::before { background: repeating-linear-gradient(to bottom, color-mix(in oklab, var(--warn) 45%, transparent) 0 4px, transparent 4px 9px); }
+.spine-empty, .spine-clean {
+  padding: 14px 8px;
+  color: var(--ink-faint);
+  font-size: var(--text-xs);
+  white-space: pre-wrap;
+}
+.spine-clean { display: flex; align-items: center; gap: 8px; }
+.spine-clean i { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; background: color-mix(in oklab, var(--git) 18%, transparent); color: var(--git); font-style: normal; font-size: var(--text-xs); }
+
+.barrier {
+  margin: 8px 8px 4px 10px;
+  padding: 9px 12px;
+  border: 1px solid color-mix(in oklab, var(--risk) 55%, transparent);
+  border-left-width: 4px;
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--risk) 8%, transparent);
+}
+.barrier b { display: block; color: var(--risk); font-size: var(--text-sm); font-weight: 650; text-transform: capitalize; }
+.barrier span { color: var(--ink-dim); font-size: var(--text-xs); }
+
+/* waiting cards */
+.card {
+  position: relative;
+  margin: 8px 0 8px 6px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg-raised);
+  overflow: hidden;
+  transition: border-color var(--fast) var(--ease), box-shadow var(--fast) var(--ease), opacity 240ms var(--ease), transform 240ms var(--ease);
+}
+.card::before {
+  content: "";
+  position: absolute;
+  left: -15px;
+  top: 15px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--warn);
+  box-shadow: 0 0 0 3px var(--bg);
+}
+.card.is-conflict::before { background: var(--risk); }
+.card.is-live::before { background: var(--accent); animation: mo-pulse 1.4s ease-in-out infinite; }
+.card.is-picked { border-color: color-mix(in oklab, var(--git) 55%, transparent); box-shadow: 0 0 0 1px color-mix(in oklab, var(--git) 30%, transparent); }
+.card.is-conflict { border-color: color-mix(in oklab, var(--risk) 40%, var(--line)); }
+.card.is-packing { opacity: 0.45; transform: translateY(10px) scale(0.98); }
+.card-head {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 9px 11px;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+}
+.card-head:hover { transform: none; background: color-mix(in oklab, var(--ink) 3%, transparent); }
+.card-title { flex: 1; min-width: 0; }
+.card-title b { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-sm); font-weight: 600; }
+.card-title small { display: block; margin-top: 1px; color: var(--ink-faint); font-size: var(--text-xs); }
+.card-live { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+.card-files { border-top: 1px solid var(--line-soft); }
+.card-file {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 11px 5px 14px;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+}
+.card-file:hover { transform: none; background: color-mix(in oklab, var(--ink) 3%, transparent); }
+.card-file.is-picked { background: color-mix(in oklab, var(--git) 10%, transparent); }
+.card-file.is-off { opacity: 0.4; }
+.card-file.is-off b { text-decoration: line-through; }
+.card-file span { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 6px; overflow: hidden; }
+.card-file b { font-size: var(--text-xs); font-weight: 550; white-space: nowrap; }
+.card-file small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-faint); font-size: var(--text-xs); }
+.card-file em { flex: none; color: var(--ink-faint); font-size: var(--text-xs); font-style: normal; }
+.card-file.is-conflict em { color: var(--risk); }
+
+/* stones */
+.stone {
+  position: relative;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px 6px 8px;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  transition: opacity 200ms var(--ease), transform 320ms var(--ease);
+}
+.stone:hover { transform: none; background: color-mix(in oklab, var(--ink) 3%, transparent); }
+.stone.is-picked { background: color-mix(in oklab, var(--git) 10%, transparent); }
+.stone-dot {
+  position: absolute;
+  left: -15px;
+  top: 50%;
+  width: 8px;
+  height: 8px;
+  margin-top: -4px;
+  border-radius: 50%;
+  background: var(--ink-faint);
+  box-shadow: 0 0 0 3px var(--bg);
+}
+.stone.is-unsent .stone-dot { background: var(--unsent); }
+.stone.is-head .stone-dot { width: 11px; height: 11px; margin-top: -5.5px; left: -16.5px; box-shadow: 0 0 0 3px var(--bg), 0 0 0 5px color-mix(in oklab, var(--unsent) 35%, transparent); }
+.stone.is-ghost { opacity: 0.62; }
+.stone.is-ghost .stone-dot { background: transparent; border: 2px dashed var(--ghost); width: 6px; height: 6px; margin-top: -4px; left: -14px; }
+.stone.is-ghost .stone-sub { color: var(--ghost); }
+.stone-sub { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-sm); }
+.stone-age { flex: none; color: var(--ink-faint); font-size: var(--text-xs); }
+.flag {
+  display: inline-block;
+  margin-right: 5px;
+  padding: 0 5px;
+  border-radius: 4px;
+  font-size: var(--text-xs);
+  font-style: normal;
+  font-weight: 650;
+  vertical-align: 1px;
+}
+.flag.is-branch { background: color-mix(in oklab, var(--git) 18%, transparent); color: var(--git); }
+.flag.is-remote { background: color-mix(in oklab, var(--incoming) 18%, transparent); color: var(--incoming); }
+.flag.is-tag { background: color-mix(in oklab, var(--warn) 20%, transparent); color: var(--warn); }
+.stone.is-sending { animation: mo-pulse 700ms ease-in-out infinite; transform: translateY(4px); }
+.stone.is-arriving { opacity: 1; animation: mo-pulse 700ms ease-in-out infinite; }
+
+/* the remote line */
+.remote-line {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0;
+  padding: 5px 6px 5px 0;
+  border-radius: 8px;
+}
+.remote-line::before {
+  content: "";
+  position: absolute;
+  left: -12px;
+  width: 8px;
+  height: 8px;
+  top: 50%;
+  margin-top: -4px;
+  border-radius: 2px;
+  transform: rotate(45deg);
+  background: var(--incoming);
+  box-shadow: 0 0 0 3px var(--bg);
+}
+.remote-line.is-dotted::before { background: transparent; border: 2px dashed var(--ink-faint); width: 5px; height: 5px; }
+.remote-line.is-picked { background: color-mix(in oklab, var(--incoming) 10%, transparent); }
+.line-name {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 6px 2px 4px;
+  background: transparent;
+  color: var(--incoming);
+  font-size: var(--text-xs);
+  font-weight: 650;
+}
+.line-name:hover { transform: none; text-decoration: underline; }
+.line-name .ui-icon { width: 12px; height: 12px; }
+.remote-line.is-dotted .line-name { color: var(--ink-faint); }
+.line-track {
+  position: relative;
+  flex: 1;
+  height: 2px;
+  background: var(--incoming);
+  border-radius: 2px;
+  overflow: visible;
+}
+.remote-line.is-dotted .line-track { background: repeating-linear-gradient(to right, var(--ink-faint) 0 4px, transparent 4px 8px); }
+.line-packet {
+  position: absolute;
+  top: -3px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--incoming);
+  box-shadow: 0 0 10px var(--incoming);
+}
+.line-go {
+  flex: none;
+  padding: 3px 10px;
+  border: 1px solid color-mix(in oklab, var(--incoming) 55%, transparent);
+  border-radius: 20px;
+  background: color-mix(in oklab, var(--incoming) 12%, transparent);
+  color: var(--incoming);
+  font-size: var(--text-xs);
+  font-weight: 650;
+}
+.line-go:hover { transform: none; background: var(--incoming); color: var(--on-accent, #fff); }
+.line-phase { flex: none; color: var(--incoming); font-size: var(--text-xs); font-weight: 600; }
+.line-phase.is-ok { color: var(--ink-faint); font-weight: 500; }
+
+/* ---------------------------------------------------------------- focus */
+
+.git-focus {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg);
+}
+.focus-head {
+  flex: none;
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 16px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-raised);
+}
+.focus-head > div { flex: 1; min-width: 0; }
+.focus-head small { display: block; color: var(--ink-faint); font: 600 var(--text-xs)/1.2 ui-monospace, Menlo, monospace; letter-spacing: 0.1em; }
+.focus-head b { display: block; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-md); font-weight: 600; }
+.focus-body { flex: 1; min-height: 0; overflow: auto; padding: 14px 16px 40px; }
+.focus-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: var(--ink-faint);
+  font-size: var(--text-xs);
+}
+.focus-empty .ui-icon { width: 26px; height: 26px; color: var(--git); opacity: 0.6; }
+.focus-empty b { color: var(--ink-dim); font-size: var(--text-sm); }
+.focus-lede { margin: 0 0 12px; color: var(--ink-dim); font-size: var(--text-sm); line-height: 1.5; }
+.focus-lede.is-live { color: var(--accent); }
+.focus-prompt {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border-left: 3px solid var(--accent);
+  border-radius: 0 8px 8px 0;
+  background: color-mix(in oklab, var(--accent) 7%, transparent);
+  color: var(--ink);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  max-height: 140px;
+  overflow: auto;
+}
+.focus-files { display: flex; flex-direction: column; gap: 2px; margin-bottom: 14px; }
+.focus-file {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+  width: 100%;
+}
+.focus-file:hover { transform: none; background: color-mix(in oklab, var(--ink) 3%, transparent); }
+.focus-file.is-picked { background: color-mix(in oklab, var(--git) 10%, transparent); }
+.focus-file.is-off { opacity: 0.45; }
+.focus-file-open { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; background: transparent; color: inherit; text-align: left; padding: 0; }
+.focus-file-open:hover { transform: none; }
+.focus-file span, .focus-file-open span { flex: 1; min-width: 0; display: flex; align-items: baseline; gap: 6px; overflow: hidden; }
+.focus-file b { font-size: var(--text-sm); font-weight: 550; white-space: nowrap; }
+.focus-file small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink-faint); font-size: var(--text-xs); }
+.focus-file em { flex: none; color: var(--ink-faint); font-size: var(--text-xs); font-style: normal; }
+.focus-file.is-conflict em { color: var(--risk); }
+.adds { color: var(--git); font-style: normal; }
+.dels { color: var(--risk); font-style: normal; margin-left: 5px; }
+.tick { flex: none; display: grid; place-items: center; width: 16px; height: 16px; }
+.tick input { position: absolute; opacity: 0; width: 0; height: 0; }
+.tick span {
+  width: 14px;
+  height: 14px;
+  border: 1.5px solid var(--ink-faint);
+  border-radius: 4px;
+  display: grid;
+  place-items: center;
+}
+.tick input:checked + span { border-color: var(--git); background: var(--git); }
+.tick input:checked + span::after { content: "✓"; color: var(--on-accent, #fff); font-size: var(--text-xs); font-weight: 800; }
+.focus-message { display: block; margin-bottom: 12px; }
+.focus-message > span { display: block; margin-bottom: 4px; color: var(--ink-faint); font-size: var(--text-xs); font-weight: 650; letter-spacing: 0.06em; text-transform: uppercase; }
+.commit-msg {
+  width: 100%;
+  min-height: 46px;
+  resize: vertical;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  outline: none;
+  background: var(--bg-raised);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--text-md);
+  line-height: 1.45;
+}
+.commit-msg:focus { border-color: color-mix(in oklab, var(--git) 55%, transparent); }
+.commit-msg::placeholder { color: var(--ink-faint); }
+.focus-acts { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.focus-acts.inline { flex: none; }
+.focus-agent {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding: 4px 6px;
+  background: transparent;
+  color: var(--ink-faint);
+  font-size: var(--text-xs);
+}
+.focus-agent:hover { transform: none; color: color-mix(in oklab, var(--accent) 70%, var(--ink)); }
+.focus-agent .ui-icon { width: 13px; height: 13px; }
+.focus-meta { display: flex; align-items: center; gap: 8px; margin: 0 0 10px; color: var(--ink-dim); font-size: var(--text-xs); }
+.focus-meta b { color: var(--ink); font-weight: 600; }
+.focus-meta .diffstat { margin-left: auto; font-family: ui-monospace, Menlo, monospace; font-size: var(--text-xs); }
+.focus-commit-body {
+  margin: 0 0 14px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: var(--bg-raised);
+  color: var(--ink-dim);
+  font: var(--text-xs)/1.5 inherit;
+  font-family: inherit;
+  white-space: pre-wrap;
+}
+.line-group { margin-bottom: 16px; }
+.line-group h4 { display: flex; align-items: baseline; gap: 8px; margin: 0 0 6px; color: var(--ink-dim); font-size: var(--text-xs); font-weight: 650; letter-spacing: 0.08em; text-transform: uppercase; }
+.line-group h4 span { color: var(--ink-faint); font-weight: 500; }
+.focus-file.is-unsent .file-code { color: var(--unsent); background: color-mix(in oklab, var(--unsent) 14%, transparent); }
+.focus-file.is-ghost .file-code { color: var(--ghost); }
+
+/* diff */
+.focus-diff {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  overflow: auto;
+  padding: 12px 16px 40px;
+  color: color-mix(in oklab, var(--ink) 80%, var(--ink-dim));
+  font-family: ui-monospace, Menlo, monospace;
+  font-size: var(--text-xs);
+  line-height: 1.55;
+  tab-size: 2;
+  white-space: pre;
+}
+/* One vertical scroll through every file; each patch keeps horizontal scrolling. */
+.expanded-file { min-width: 0; margin-bottom: 12px; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+.expanded-file > .focus-file { border-radius: 0; background: var(--bg-raised); }
+.focus-diff.is-expanded { flex: none; max-height: none; padding: 10px 12px; border-top: 1px solid var(--line); }
+.focus-diff > span { display: block; min-height: 1.55em; }
+.focus-diff .diff-hint { color: var(--ink-faint); font-family: inherit; }
+.focus-diff .dl-h { color: var(--ink-faint); }
+.focus-diff .dl-at { color: var(--incoming); background: color-mix(in oklab, var(--incoming) 6%, transparent); }
+.focus-diff .dl-add { color: color-mix(in oklab, var(--git) 80%, var(--ink)); background: color-mix(in oklab, var(--git) 7%, transparent); }
+.focus-diff .dl-del { color: color-mix(in oklab, var(--risk) 80%, var(--ink)); background: color-mix(in oklab, var(--risk) 7%, transparent); }
+.focus-diff .dl-mark { color: var(--warn); background: color-mix(in oklab, var(--warn) 10%, transparent); font-weight: 700; }
+.focus-diff.is-media { padding: 0; white-space: normal; font-family: inherit; }
+
+.git-image-preview { min-height: 100%; display: flex; flex-direction: column; margin: 0; }
+.git-image-stage {
+  flex: 1;
+  min-height: 240px;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background-color: var(--bg-sunken);
+  background-image:
+    linear-gradient(45deg, color-mix(in oklab, var(--ink) 3%, transparent) 25%, transparent 25%),
+    linear-gradient(-45deg, color-mix(in oklab, var(--ink) 3%, transparent) 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, color-mix(in oklab, var(--ink) 3%, transparent) 75%),
+    linear-gradient(-45deg, transparent 75%, color-mix(in oklab, var(--ink) 3%, transparent) 75%);
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0;
+  background-size: 16px 16px;
+}
+.git-image-stage img { display: block; max-width: 100%; max-height: min(62vh, 720px); object-fit: contain; border-radius: 8px; box-shadow: 0 18px 48px color-mix(in oklab, var(--bg-sunken) 76%, transparent); }
+.git-image-preview figcaption { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 10px 14px; border-top: 1px solid var(--line); background: var(--bg); }
+.git-image-preview figcaption span { min-width: 0; }
+.git-image-preview figcaption b, .git-image-preview figcaption small { display: block; }
+.git-image-preview figcaption b { color: var(--ink); font-size: var(--text-xs); font-weight: 600; }
+.git-image-preview figcaption small { margin-top: 2px; color: var(--ink-faint); font-size: var(--text-xs); }
+.git-image-preview figcaption code { overflow: hidden; color: var(--ink-dim); font-size: var(--text-xs); text-overflow: ellipsis; white-space: nowrap; }
+.git-media-empty { min-height: 100%; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 7px; padding: 24px; color: var(--ink-faint); font-size: var(--text-xs); text-align: center; }
+.git-media-empty .ui-icon { width: 25px; height: 25px; margin-bottom: 3px; color: var(--m-work); }
+.git-media-empty b { color: var(--ink); font-size: var(--text-sm); font-weight: 600; }
+
+/* ---------------------------------------------------------------- safety bar */
+
+.git-safety {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 38px;
+  padding: 5px 12px;
+  border-top: 1px solid var(--line);
+  background: var(--bg-raised);
+}
+.git-safety:empty { display: none; }
+.safe {
+  padding: 4px 9px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink-dim);
+  font-size: var(--text-xs);
+}
+.safe:hover { transform: none; border-color: var(--line); color: var(--ink); }
+.safe:disabled { opacity: 0.35; cursor: default; }
+.safe:disabled:hover { border-color: transparent; color: var(--ink-dim); }
+.safe-note {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding: 2px 4px 2px 10px;
+  border: 1px solid color-mix(in oklab, var(--git) 40%, transparent);
+  border-radius: 20px;
+  background: color-mix(in oklab, var(--git) 8%, transparent);
+  color: var(--ink);
+  font-size: var(--text-xs);
+}
+.safe-note .safe { color: var(--git); font-weight: 650; }
+
+/* ---------------------------------------------------------------- drawer */
+
+.git-drawer {
+  position: absolute;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(360px, 90%);
+  overflow: auto;
+  border-left: 1px solid var(--line);
+  background: var(--bg-raised);
+  box-shadow: -18px 0 40px color-mix(in oklab, var(--bg-sunken) 50%, transparent);
+  animation: mo-rise 220ms var(--ease) both;
+  --mo-dist: 0;
+  z-index: 5;
+}
+.git-drawer[hidden] { display: none; }
+.drawer-head, .atlas-head {
+  position: sticky;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-raised);
+  z-index: 1;
+}
+.drawer-head b, .atlas-head b { display: inline-flex; align-items: center; gap: 7px; font-size: var(--text-sm); font-weight: 650; }
+.drawer-head .ui-icon, .atlas-head .ui-icon { width: 14px; height: 14px; color: var(--git); }
+.drawer-acts { display: inline-flex; gap: 6px; }
+.drawer-empty { padding: 14px; color: var(--ink-faint); font-size: var(--text-xs); }
+.thread { position: relative; display: flex; gap: 10px; padding: 10px 14px 10px 26px; }
+.thread-line { position: absolute; left: 14px; top: 0; bottom: 0; width: 2px; background: color-mix(in oklab, var(--ink) 10%, transparent); }
+.thread-line::after { content: ""; position: absolute; left: -3px; top: 16px; width: 8px; height: 8px; border-radius: 50%; background: var(--ink-faint); }
+.thread.is-current .thread-line { background: var(--git); }
+.thread.is-current .thread-line::after { background: var(--git); box-shadow: 0 0 0 3px color-mix(in oklab, var(--git) 25%, transparent); }
+.thread.is-old { opacity: 0.6; }
+.thread-body { flex: 1; min-width: 0; }
+.thread-body b { display: block; font-size: var(--text-sm); font-weight: 600; }
+.thread-body small { display: block; margin-top: 2px; color: var(--ink-faint); font-size: var(--text-xs); }
+.thread-acts { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
+
+/* ---------------------------------------------------------------- atlas */
+
+.git-atlas {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  background: var(--bg);
+  z-index: 6;
+  animation: mo-rise 200ms var(--ease) both;
+}
+.git-atlas[hidden] { display: none; }
+.atlas-list { padding: 8px 14px 40px; }
+.atlas-empty { padding: 14px 0; color: var(--ink-faint); font-size: var(--text-xs); }
+.atlas-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(140px, 1fr) 2fr minmax(120px, 1fr);
+  align-items: center;
+  gap: 14px;
+  padding: 10px 12px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+}
+.atlas-row:hover { transform: none; border-color: var(--line); background: var(--bg-raised); }
+.atlas-row.is-here { border-color: color-mix(in oklab, var(--git) 45%, transparent); }
+.atlas-row.is-quiet { opacity: 0.55; }
+.atlas-name b { display: block; font-size: var(--text-sm); font-weight: 600; }
+.atlas-name small { display: block; color: var(--ink-faint); font-size: var(--text-xs); }
+.atlas-spine { display: flex; align-items: center; gap: 3px; min-height: 14px; }
+.atlas-line { flex: none; width: 2px; height: 14px; margin: 0 6px; background: var(--incoming); border-radius: 2px; }
+.atlas-dots { display: inline-flex; align-items: center; gap: 3px; }
+.atlas-dots i { width: 7px; height: 7px; border-radius: 50%; }
+.atlas-dots.is-dirty i { border-radius: 2px; background: var(--warn); }
+.atlas-dots.is-unsent i { background: var(--unsent); }
+.atlas-dots.is-incoming i { background: transparent; border: 1.5px dashed var(--ghost); width: 5px; height: 5px; }
+.atlas-dots em { color: var(--ink-faint); font-size: var(--text-xs); font-style: normal; margin-left: 2px; }
+.atlas-sum { color: var(--ink-dim); font-size: var(--text-xs); text-align: right; }
+
+/* ---------------------------------------------------------------- stone menu */
+
+.stone-menu {
+  position: absolute;
+  z-index: 7;
+  width: 270px;
+  padding: 5px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--bg-raised);
+  box-shadow: 0 16px 40px color-mix(in oklab, var(--bg-sunken) 60%, transparent);
+  animation: mo-pop 160ms var(--ease) both;
+  --mo-from: 0.96;
+  --mo-over: 1;
+}
+.stone-menu[hidden] { display: none; }
+.stone-menu button {
+  width: 100%;
+  display: block;
+  padding: 7px 9px;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink);
+  text-align: left;
+}
+.stone-menu button:hover { transform: none; background: color-mix(in oklab, var(--ink) 5%, transparent); }
+.stone-menu button.is-danger b { color: var(--risk); }
+.stone-menu b { display: block; font-size: var(--text-sm); font-weight: 600; }
+.stone-menu small { display: block; margin-top: 1px; color: var(--ink-faint); font-size: var(--text-xs); }
+
+@media (prefers-reduced-motion: reduce) {
+  .git-pane * { animation: none !important; transition: none !important; }
+}
+
+/* Keep reviewing and composing comfortable in narrower project panes. */
+.selection-bar, .review-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--ink-dim);
+  font-size: var(--text-xs);
+}
+.selection-bar { margin-bottom: 8px; }
+.selection-bar > span { flex: 1; }
+.review-nav { flex: none; padding: 8px 16px; border-bottom: 1px solid var(--line); }
+.review-nav > span { flex: 1; text-align: center; color: var(--ink-faint); font-size: var(--text-xs); }
+.commit-scope { margin: 9px 0 0; color: var(--ink-faint); font-size: var(--text-xs); line-height: 1.5; }
+.git-pane button:focus-visible, .tick input:focus-visible + span {
+  outline: 2px solid var(--git);
+  outline-offset: 2px;
+}
+.focus-file { min-height: 32px; }
+.focus-diff { font-size: var(--text-sm); }
+.git-move { flex-wrap: wrap; }
+.move-where { max-width: 100%; margin-left: auto; flex-wrap: wrap; }
+.where-repo, .where-branch { min-width: 0; max-width: 200px; }
+.where-branch span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.focus-head { flex-wrap: wrap; }
+.focus-head > div { flex-basis: 160px; }
+.git-safety { flex-wrap: wrap; }
+.git-pane { container-type: inline-size; }
+@container (max-width: 680px) {
+  .git-body { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(120px, 34%) minmax(0, 1fr); }
+  .git-spine { border-right: 0; border-bottom: 1px solid var(--line); }
+  .move-where { flex-basis: 100%; justify-content: flex-end; }
+  .move-text { font-size: var(--text-sm); }
+  .review-nav > span { display: none; }
+  .review-nav { justify-content: space-between; }
+  .atlas-row { grid-template-columns: minmax(0, 1fr) auto; gap: 8px; }
+  .atlas-spine { display: none; }
+}
+
+/* Branch management stays visible beside the current branch. */
+.where-branch b { flex: none; font-size: inherit; }
+.branch-search-wrap { display: block; padding: 10px 14px; }
+.branch-search { width: 100%; min-width: 0; padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--bg-raised); color: var(--ink); font: inherit; }
+.branch-search:focus-visible { outline: 2px solid var(--git); outline-offset: 2px; }
+.thread[hidden], .branch-no-match[hidden] { display: none; }
+.thread-body b { overflow-wrap: anywhere; }

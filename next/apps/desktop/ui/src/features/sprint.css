@@ -1,0 +1,400 @@
+/**
+ * Sprint — the plan screen. Same vocabulary as Home (label, verdict pill, card) so it reads as
+ * the same product one page over. Tokens only; the light theme retunes them in style.css.
+ *
+ * MOTION: transform/opacity only. `.is-enter` plays once per open(); every repaint lands still.
+ */
+
+.sprint[hidden] { display: none; }
+
+/* One cell, two occupants: the rendered plan and the raw file. They swap without either one
+   resizing the other, and each owns its own scrolling. */
+.sprint {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr);
+  min-height: 0;
+  background: var(--bg);
+}
+.sprint > * { grid-area: 1 / 1; min-width: 0; min-height: 0; }
+.sp-plan { overflow-y: auto; }
+.sp-plan[hidden], .sp-edit[hidden] { display: none; }
+
+/* ------------------------------------------------------------ hand editor */
+
+.sp-edit {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  overflow: hidden;
+}
+.sp-edit-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-raised);
+}
+.sp-edit-head > b { font-size: var(--text-md); color: var(--ink); flex: none; }
+.sp-edit-path {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+  font-size: var(--text-sm);
+  color: var(--ink-faint);
+}
+.sp-edit-status { flex: none; font-size: var(--text-sm); color: var(--ink-dim); }
+.sp-edit-status.is-error { color: var(--risk); }
+.sp-edit-body { min-height: 0; overflow: hidden; }
+
+.sp-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  width: 100%;
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 22px 22px 48px;
+}
+.sp-inner.is-enter { animation: sp-in var(--base) var(--ease) both; }
+@keyframes sp-in {
+  from { transform: translateY(6px); opacity: 0; }
+  to   { transform: none;            opacity: 1; }
+}
+.sp-inner.is-busy { pointer-events: none; opacity: 0.7; }
+
+/* ------------------------------------------------------------------- head */
+
+.sp-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 18px 20px;
+  border: 1px solid color-mix(in oklab, var(--accent) 24%, var(--line-soft));
+  border-radius: 16px;
+  background: var(--bg-raised);
+}
+.sp-head-copy { display: flex; flex-direction: column; gap: 8px; min-width: 0; }
+.sp-kicker {
+  font-size: var(--text-xs);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent);
+}
+.sp-title { font-size: var(--text-2xl); font-weight: 700; color: var(--ink); line-height: 1.2; }
+.sp-meta { font-size: var(--text-sm); color: var(--ink-dim); }
+.sp-lede { margin: 0; font-size: var(--text-md); color: var(--ink-dim); max-width: 46ch; }
+
+/* What the repositories say, beside what the plan says. It turns risk-coloured when finished
+   work is still sitting on this machine, because that is the failure the plan cannot see. */
+.sp-moved { font-size: var(--text-sm); color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+.sp-moved.is-risk { color: var(--warn); }
+
+.sp-meter {
+  position: relative;
+  width: min(320px, 100%);
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--line);
+}
+.sp-meter i {
+  position: absolute;
+  inset: 0;
+  transform-origin: left;
+  background: var(--ok);
+  transition: transform var(--base) var(--ease);
+}
+
+.sp-focus { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 2px; }
+
+.sp-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: var(--text-sm);
+  color: var(--ink-dim);
+  background: var(--bg);
+}
+.sp-chip.is-door, .sp-chip.is-pick { cursor: pointer; }
+.sp-chip.is-door:hover, .sp-chip.is-pick:hover { color: var(--ink); border-color: var(--accent); }
+.sp-chip.is-on {
+  color: var(--accent);
+  border-color: color-mix(in oklab, var(--accent) 40%, transparent);
+  background: var(--accent-soft);
+}
+.sp-chip.is-on::before {
+  content: attr(data-order);
+  font-size: var(--text-xs);
+  font-weight: 700;
+}
+.sp-chip.is-past { opacity: 0.7; }
+.sp-chip b { font-weight: 600; color: var(--ink); }
+
+.sp-head-actions { display: flex; flex-direction: column; gap: 6px; flex: none; }
+
+.sp-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 32px;
+  padding: 0 13px;
+  border: 1px solid color-mix(in oklab, var(--accent) 40%, transparent);
+  border-radius: 8px;
+  font: inherit;
+  font-size: var(--text-md);
+  font-weight: 600;
+  color: var(--accent);
+  background: var(--accent-soft);
+  cursor: pointer;
+  transition: transform var(--fast) var(--ease), opacity var(--fast) var(--ease);
+}
+.sp-btn:hover { transform: translateY(-1px); }
+.sp-btn:active { transform: none; }
+.sp-btn svg { width: 14px; height: 14px; }
+.sp-btn.is-quiet { color: var(--ink-dim); border-color: var(--line); background: transparent; }
+.sp-btn.is-start { color: var(--on-accent); background: var(--accent); border-color: var(--accent); }
+
+.sp-note { margin: 0; font-size: var(--text-md); color: var(--ink-dim); }
+.sp-note.is-error { color: var(--risk); }
+
+/* ------------------------------------------------------------ create form */
+
+.sp-create {
+  display: grid;
+  grid-template-columns: 1fr 2fr 1fr 1fr;
+  gap: 10px 12px;
+  padding: 14px 16px;
+  border: 1px dashed var(--line);
+  border-radius: 12px;
+  background: var(--bg-raised);
+}
+.sp-create label { display: flex; flex-direction: column; gap: 4px; font-size: var(--text-xs); color: var(--ink-faint); }
+.sp-create label.is-wide { grid-column: span 1; }
+.sp-create input,
+.sp-composer input,
+.sp-composer select,
+.sp-kind {
+  min-height: 30px;
+  padding: 0 9px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  font: inherit;
+  font-size: var(--text-md);
+  color: var(--ink);
+  background: var(--bg);
+}
+.sp-create input:focus, .sp-composer input:focus { outline: none; border-color: var(--accent); }
+.sp-create-focus { grid-column: 1 / -1; display: flex; flex-direction: column; gap: 6px; font-size: var(--text-xs); color: var(--ink-faint); }
+.sp-create-apps { display: flex; flex-wrap: wrap; gap: 6px; }
+.sp-create footer { grid-column: 1 / -1; display: flex; justify-content: flex-end; }
+
+/* ---------------------------------------------------------------- sections */
+
+.sp-section-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.sp-count { font-size: var(--text-xs); color: var(--ink-faint); }
+.sp-none { padding: 14px 16px; border: 1px dashed var(--line); border-radius: 12px; font-size: var(--text-md); color: var(--ink-dim); }
+
+.sp-next, .sp-goals, .sp-blocked, .sp-left, .sp-others { display: flex; flex-direction: column; gap: 10px; }
+
+/* ---------------------------------------------------------------- next up */
+
+.sp-hero {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 18px 20px;
+  border: 1px solid color-mix(in oklab, var(--accent) 36%, var(--line));
+  border-radius: 14px;
+  background:
+    radial-gradient(120% 140% at 0% 0%, color-mix(in oklab, var(--accent) 16%, transparent) 0%, transparent 60%),
+    var(--bg-raised);
+}
+.sp-hero-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.sp-hero-app { font-size: var(--text-sm); letter-spacing: 0.06em; text-transform: uppercase; color: var(--accent); }
+.sp-hero-text { margin: 0; font-size: var(--text-xl); font-weight: 600; line-height: 1.35; color: var(--ink); }
+.sp-hero-when { font-size: var(--text-sm); color: var(--ink-dim); }
+.sp-hero .sp-goal-actions { margin-top: 6px; }
+
+.sp-goal-actions { display: flex; align-items: center; gap: 6px; flex: none; }
+.sp-mini {
+  display: inline-grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  font: inherit;
+  font-size: var(--text-sm);
+  color: var(--ink-dim);
+  background: transparent;
+  cursor: pointer;
+}
+.sp-mini:hover { color: var(--ink); border-color: var(--accent); }
+.sp-mini svg { width: 12px; height: 12px; }
+
+/* ------------------------------------------------------------------ goals */
+
+.sp-group {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+  background: var(--bg-raised);
+  overflow: hidden;
+}
+.sp-group-name {
+  margin: 0;
+  padding: 9px 14px 7px;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--ink-dim);
+  border-bottom: 1px solid var(--line-soft);
+}
+.sp-group-name.is-door { cursor: pointer; }
+.sp-group-name.is-door:hover { color: var(--accent); }
+
+.sp-goal {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 14px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.sp-goal:last-child { border-bottom: 0; }
+.sp-goal .home-verdict { padding: 4px 10px; font-size: var(--text-xs); }
+.sp-goal .home-verdict.is-door { cursor: pointer; }
+.sp-goal-body { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sp-goal-text { font-size: var(--text-md); color: var(--ink); }
+.sp-goal-when { font-size: var(--text-sm); color: var(--ink-faint); }
+.sp-goal.is-done .sp-goal-text { color: var(--ink-faint); text-decoration: line-through; }
+.sp-owner { font-size: var(--text-xs); font-style: normal; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-faint); }
+
+.sp-composer {
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 2fr) minmax(0, 1.4fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 4px 0 0;
+}
+
+/* ------------------------------------------------------------- activity */
+
+/* One line of ground truth under each app name. Reads left to right as: where, how much,
+   what is at risk, and what the last thing actually was. */
+.sp-activity {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 4px 10px;
+  padding: 6px 14px 8px;
+  border-bottom: 1px solid var(--line-soft);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-dim);
+}
+.sp-act-branch {
+  padding: 1px 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  font-size: var(--text-xs);
+  color: var(--ink-dim);
+}
+.sp-act-on { color: var(--ok); }
+.sp-act-risk { color: var(--warn); }
+.sp-activity.is-quiet .sp-act-quiet { color: var(--ink-faint); }
+.sp-act-last {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+  flex: 1 1 220px;
+  color: var(--ink-faint);
+}
+.sp-act-last i { font-style: normal; color: var(--ink-faint); }
+.sp-act-last em {
+  font-style: normal;
+  color: var(--ink-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sp-act-last time { flex: none; }
+
+/* ---------------------------------------------------------------- blocked */
+
+.sp-blocked-row {
+  display: flex;
+  gap: 10px;
+  width: 100%;
+  padding: 8px 12px;
+  border: 0;
+  border-left: 3px solid var(--warn);
+  border-radius: 6px;
+  background: color-mix(in oklab, var(--warn) 7%, var(--bg-raised));
+  font: inherit;
+  font-size: var(--text-md);
+  text-align: left;
+  color: var(--ink);
+}
+.sp-blocked-row b { flex: none; text-transform: uppercase; font-size: var(--text-xs); letter-spacing: 0.05em; color: var(--warn); align-self: center; }
+.sp-blocked-row > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* An agent that stopped is louder than a standing block: it is holding a session open. */
+.sp-blocked-row.is-agent {
+  cursor: pointer;
+  border-left-color: var(--risk);
+  background: color-mix(in oklab, var(--risk) 8%, var(--bg-raised));
+}
+.sp-blocked-row.is-agent b { color: var(--risk); }
+.sp-blocked-row.is-agent:hover { background: color-mix(in oklab, var(--risk) 14%, var(--bg-raised)); }
+
+/* ----------------------------------------------------------- where we left */
+
+.sp-report {
+  display: grid;
+  grid-template-columns: 130px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 9px 14px;
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  font: inherit;
+  text-align: left;
+  color: var(--ink);
+  background: var(--bg-raised);
+  cursor: pointer;
+}
+.sp-report:hover { border-color: var(--accent); }
+.sp-report b { font-size: var(--text-md); font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sp-report > span { font-size: var(--text-md); color: var(--ink-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sp-report small { display: inline-flex; align-items: center; gap: 8px; font-size: var(--text-xs); color: var(--ink-faint); white-space: nowrap; }
+.sp-outcome { font-style: normal; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; font-size: var(--text-xs); }
+.sp-outcome.is-done { color: var(--ok); }
+.sp-outcome.is-blocked, .sp-outcome.is-needs_decision { color: var(--warn); }
+.sp-outcome.is-progress { color: var(--accent); }
+
+.sp-log { display: flex; flex-direction: column; gap: 4px; padding-top: 6px; }
+.sp-log-line { font-size: var(--text-sm); color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+
+/* ---------------------------------------------------------- other sprints */
+
+.sp-others-row { display: flex; flex-wrap: wrap; gap: 8px; }
+.sp-others-row .sp-chip { flex-direction: column; align-items: flex-start; gap: 1px; padding: 7px 12px; border-radius: 10px; }
+.sp-others-row .sp-chip span { font-size: var(--text-xs); color: var(--ink-faint); }
+
+@media (prefers-reduced-motion: reduce) {
+  .sp-inner.is-enter { animation: none; }
+  .sp-btn:hover { transform: none; }
+}

@@ -1,0 +1,1702 @@
+/**
+ * Shell, tokens, motion budget.
+ *
+ * THE MOTION BUDGET — this is a hard rule, not a preference. The whole reason Appgea Panel
+ * exists is that the old stack was heavy. A dashboard that chugs while the agent works is
+ * worse than no dashboard, because it steals the CPU from the thing you actually care about.
+ *
+ *   ALLOWED   transform, opacity, filter        (compositor-only; no layout, no paint)
+ *             canvas for anything continuous
+ *             content-visibility, ring-buffered lists
+ *
+ *   BANNED    animating width/height/top/left/margin  -> layout thrash every frame
+ *             animating box-shadow / background-position -> full repaint every frame
+ *             a DOM node per streamed token
+ *             setInterval repaint loops; rAF that runs while nothing is moving
+ *
+ * Every animation below is transform/opacity only. Keep it that way.
+ */
+
+:root {
+  --bg: #070910;
+  --bg-raised: #0c101a;
+  --bg-sunken: #05070c;
+  --line: #1b2233;
+  --line-soft: #141a28;
+  --ink: #d8dEEA;
+  --ink-dim: #7f8ba3;
+  --ink-faint: #788397;
+  --accent: #9a88ff;
+  --accent-soft: #9a88ff22;
+  --ok: #67d99a;
+  --warn: #e8c66a;
+  --risk: #ff6b81;
+
+  /* Ink that rides ON TOP of a saturated hue — the badge number, a primary button's
+     label. Dark hues are bright, so this is near-black; the light theme flips it to white
+     (see the light block). Anything painting text on a --m-* / --accent fill reads this. */
+  --on-accent: #08090d;
+
+  /* ---- Module hues ----
+   * Appgea Panel arrived monochrome: one purple accent for everything, so Git, Product Spine and
+   * Release all looked like the same nothing, and the screen had no landmarks. Colour here is
+   * IDENTITY, not decoration — one hue per module, worn by its rail segment, its dashboard card
+   * and its screen, so "the green one" and "the amber one" become how you navigate.
+   *
+   * Two of these are inherited rather than chosen: green for git and amber for Product Spine are
+   * what the old dashboard used (`.tab.gittab.sel`, `.tab.dmtab.sel`), and the git-manager
+   * module still draws its own graph in green. Re-hueing them would have made the module and
+   * the chrome around it disagree about what green means. */
+  --m-term: var(--k-shell); /* Terminals — the same teal the shell wears everywhere else */
+  --m-dash: #9a88ff; /* the app's own accent — the resting screen */
+  --m-work: #58b6ff; /* what needs you */
+  --m-debug: #ef5b72; /* paused code and breakpoints */
+  --m-git: #3fb950; /* matches the commit graph the module draws */
+  --m-spine: #d9a441; /* Product Spine */
+  --m-rel: #ff7a59; /* shipping */
+  --m-rc: #f5a623; /* RevenueCat — product revenue */
+  --m-std: #6f8fd6; /* Standards — steel blue: a compliance read, never an alarm */
+  --m-an: #e879b9; /* Analytics — the only magenta on the rail, so a health read never reads as revenue */
+
+  /* ---- Session-kind hues ----
+   * Worn by the strip's tabs, the wall's dots and the ＋ pane's engine cards, so "the lilac
+   * one" means codex everywhere. Claude deliberately wears the app accent. */
+  --k-claude: var(--accent);
+  --k-codex: #b892ff;
+  --k-grok: #ff6b6b;
+  --k-kimi: #4fa3ff;
+  --k-dshline: #8299ff;
+  --k-glm: #ffb84d;
+  --k-opencode: #5fd97a;
+  --k-shell: #63d5c8;
+  --k-task: #e0a94a;
+
+  --radius: 10px;
+  --radius-sm: 6px;
+  --pad: 14px;
+
+  /* ---- Type scale ----
+   * Six steps, nothing between them. The floor is 11px: the rail used to carry labels at 8–10px,
+   * which is a squint on a laptop and nothing at all on a projector. Display numerals (23px and
+   * up) stay literal — they are one-off art, not text you read in a row. */
+  --text-xs: 11px;
+  --text-sm: 12px;
+  --text-md: 13px;
+  --text-lg: 15px;
+  --text-xl: 18px;
+  --text-2xl: 22px;
+
+  /* One easing, one duration scale. Motion that disagrees with itself reads as jank. */
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --fast: 140ms;
+  --base: 240ms;
+
+  font-family: "SF Pro Text", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: var(--text-md);
+  color-scheme: dark;
+
+  /* ---- Panel module compat palette ----
+   * The modules ship their OWN stylesheets (git-manager/assets/chat.css draws the commit
+   * graph) and those are written against the old dashboard's variable names. They are loaded
+   * verbatim — forking them to rename a variable would fork the design we are restoring.
+   * So the old names resolve here, at their ORIGINAL values: the graph's colours carry
+   * meaning (green = landed, red = conflict), and re-tinting them to the new tokens would
+   * quietly change what the screen says. */
+  --bg-old: #0d1117;
+  --panel: #161b22;
+  --mut: #8b949e;
+  --acc: #7c5cff;
+  --accd: #6246ea;
+  --green: #3fb950;
+  --red: #f85149;
+}
+
+/* ======================================================================================
+ * LIGHT — a cool off-white RETUNE, not an inverted dark theme.
+ *
+ * Panel was born dark, and dark stays the default (:root above). Light re-tunes the same
+ * token names for light surfaces. Two things are held invariant across the switch:
+ *   IDENTITY   — every module keeps its hue FAMILY (git stays green, work stays blue,
+ *                release stays orange). The neon values that glow on black are darkened
+ *                and desaturated so they read as fills, text AND borders on a light surface.
+ *   MEANING    — green = landed / ok, amber = waiting / warn, red = conflict / risk. The
+ *                commit graph must still say the same thing, so the compat palette
+ *                (--green/--red) is re-mapped, not dropped.
+ *
+ * Surfaces don't just invert: raised LIFTS toward white, sunken RECEDES to a cool grey,
+ * and the base is a comfortable off-white — never pure #fff, which is harsh for a workspace.
+ * The attribute is set by the no-flash script in index.html <head> (localStorage else the
+ * OS preference), and flipped by the sidebar-footer toggle. Contrast on the base: ink
+ * ~10.7:1, ink-dim ~6.1:1, ink-faint ~4.6:1; every hue clears ~4.5:1, which is what lets a
+ * single white --on-accent stay legible on all seven hue chips.
+ * ==================================================================================== */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --bg: #eef1f6;
+  --bg-raised: #fbfcfe;
+  --bg-sunken: #e4e8f0;
+  --line: #cdd4e0;
+  --line-soft: #dde2eb;
+  --ink: #1c2333;
+  --ink-dim: #4d5a73;
+  --ink-faint: #626d80;
+  --accent: #6a52e6;
+  --accent-soft: #6a52e61a;
+  --ok: #12753a;
+  --warn: #916000;
+  --risk: #c42e44;
+  --on-accent: #ffffff;
+
+  --m-term: var(--k-shell);  /* Terminals — == the shell's own hue, in both themes */
+  --m-dash: #6a52e6;         /* Dashboard — == accent (violet) */
+  --m-work: #0b6bcb;         /* Work — sky blue deepened to hold contrast */
+  --m-debug: #b4233b;        /* Debug — breakpoint red with readable light contrast */
+  --m-git: #1a7f37;          /* Git — commit-graph green, reads on white */
+  --m-spine: #855610;        /* Product Spine — browner bronze-amber */
+  --m-rel: #bd3f1d;          /* Release — burnt orange-coral (stays orange vs risk's rose) */
+  --m-rc: #9c6d05;           /* RevenueCat — amber pulled down to hold contrast on white */
+  --m-std: #3a5ba8;           /* Standards — steel blue deepened to read on white */
+  --m-an: #a3246e;           /* Analytics — magenta deepened to read on white */
+
+  --k-claude: var(--accent);
+  --k-codex: #7d4dd8;        /* Codex — lilac deepened to read on white */
+  --k-grok: #c23a3a;         /* Grok — coral deepened to read on white */
+  --k-dshline: #4d6bde;       /* DeepSeek Harness — indigo */
+  --k-kimi: #2f6fd1;         /* Kimi — blue deepened to read on white */
+  --k-glm: #ad7010;          /* GLM — amber-orange deepened to read on white */
+  --k-opencode: #2f9e52;     /* opencode — green deepened to read on white */
+  --k-shell: #0e7a87;        /* Shell — the same deep teal family as dark's mint */
+  --k-task: #9c6d05;         /* Task — golden ochre */
+
+  --bg-old: #edf0f5;
+  --panel: #fafbfd;
+  --mut: #5b6575;
+  --acc: #6b4de0;
+  --accd: #5636c7;
+  --green: #1a7f37;          /* landed — green node on white */
+  --red: #d1242f;            /* conflict — unambiguous red on white */
+}
+
+* {
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: 0;
+}
+
+body {
+  margin: 0;
+  height: 100vh;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+button {
+  font: inherit;
+  color: var(--on-accent);
+  background: var(--accent);
+  border: 0;
+  border-radius: var(--radius-sm);
+  padding: 5px 11px;
+  cursor: pointer;
+  transition: transform var(--fast) var(--ease), opacity var(--fast) var(--ease);
+}
+button:hover { transform: translateY(-1px); }
+button:active { transform: translateY(0) scale(0.97); }
+button.ghost {
+  background: transparent;
+  border: 1px solid var(--line);
+  color: var(--ink-dim);
+}
+button.ghost[aria-pressed="true"] {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+/* One keyboard ring for every control that does not draw its own. :where() keeps it at zero
+   specificity, so any screen's own :focus-visible rule still wins. A click never shows it. */
+:where(button, a[href], select, summary, [role="button"], [role="tab"], [role="menuitem"]):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ------------------------------------------------------------------ shell */
+
+/* Two tracks: the portfolio, and the work.
+   Chat used to hold a third one between them. A column costs width on every screen, forever, and
+   the width it cost was exactly the width the reports needed — a screenshot in 360px is a
+   thumbnail of a thumbnail. It is a screen now, and it swaps into this second track the way Home,
+   Settings and the workspace do. */
+#app {
+  position: relative; /* the project picker overlay (⌘⇧O) covers the whole shell */
+  display: grid;
+  grid-template-columns: 232px minmax(0, 1fr);
+  height: 100vh;
+  /* Only the sidebar track ever changes size; animating the template keeps the main pane
+     reflowing in step with it. The global reduced-motion rule switches this off. */
+  transition: grid-template-columns var(--fast) var(--ease);
+}
+
+/* The compact rail. Keyed off <html> because the boot script in <head> applies it before
+   <body> exists (no first-paint flash) — the rest of the state lives in the sidebar section.
+   Kept above the single-project rules so a lone project still drops the sidebar entirely. */
+html.sidebar-compact #app { grid-template-columns: 80px minmax(0, 1fr); }
+
+body.single-project #app { grid-template-columns: minmax(0, 1fr); }
+body.single-project .sidebar { display: none; }
+
+/* Chat is a grid item like every other screen, so it has to leave the track entirely when it is
+   down — `display: none` on the host, not only on the `.chat` body inside it, or an empty aside
+   still claims the column before features/chat.ts has mounted into it. */
+html.chat-hidden #chatRail { display: none; }
+
+.sidebar {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px 12px 12px;
+  background:
+    radial-gradient(210px 180px at 4% -4%, var(--accent-soft), transparent 72%),
+    linear-gradient(180deg, color-mix(in oklab, var(--bg-sunken) 88%, var(--bg-raised)), var(--bg-sunken) 38%);
+  border-right: 1px solid var(--line-soft);
+  /* Clips the labels while the rail animates: text reads as revealed by the moving edge
+     instead of wrapping under it mid-transition. */
+  overflow: hidden;
+}
+
+.brand { display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 0 2px; }
+.brand-mark {
+  width: 36px;
+  height: 36px;
+  flex: none;
+  overflow: hidden;
+  border-radius: 10px;
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--accent) 36%, transparent),
+    0 7px 22px var(--accent-soft);
+  animation: brand 700ms var(--ease) both;
+}
+.brand-mark img { display: block; width: 100%; height: 100%; object-fit: cover; }
+@keyframes brand {
+  from { transform: scaleY(0.4); opacity: 0; }
+  to   { transform: none; }
+}
+.brand span > small { display: block; font-size: var(--text-xs); font-weight: 650; letter-spacing: 0.17em; color: var(--ink-faint); }
+.brand span > b { display: block; font-size: var(--text-lg); font-weight: 650; letter-spacing: -0.015em; margin-top: 1px; }
+
+.ui-icon,
+.nav-glyph svg,
+.mtab-ico svg {
+  display: block;
+  width: 1em;
+  height: 1em;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+/* The collapse chevron. It points where the edge will move: ‹ folds the rail away, › brings
+   it back (main.ts flips it, like the theme glyph). Pressed keeps the quiet ghost look —
+   compact is a place the user parked, not a state that needs an accent ring. */
+.sidebar-toggle { margin-left: auto; padding: 5px; font-size: var(--text-md); line-height: 1; color: var(--ink-faint); border-color: transparent !important; }
+.sidebar-toggle .ui-icon { width: 14px; height: 14px; }
+.sidebar-toggle:hover { transform: none; color: var(--ink-dim); border-color: var(--line); }
+button.ghost.sidebar-toggle[aria-pressed="true"] { border-color: var(--line); color: var(--ink-faint); }
+
+/* The Workspace group. Inbox / Runs / Terminals are three doors into ONE screen, so the lit
+   state lives HERE and not on any row: you are in the workspace or you are in a project, and
+   the tab strip inside already says which tab. A per-row highlight would read as three
+   places and fight the strip for the answer. Home uses the same box for the opposite reason —
+   it IS one place, so its single row and its group are the same thing. */
+.side-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 4px;
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--bg-raised) 46%, transparent);
+  transition: border-color var(--fast) var(--ease), background var(--fast) var(--ease);
+}
+.side-nav.is-active {
+  border-color: color-mix(in oklab, var(--accent) 30%, transparent);
+  background: color-mix(in oklab, var(--accent) 9%, var(--bg-raised));
+}
+
+/* Home is a group of ONE, above the workspace and outside it. Same box, same lit rule — so it
+   reads as a peer of the workspace rather than a row that fell out of it — but no group name:
+   a label over a single row named "Home" would say the word twice. It sits nearer the group
+   than the sidebar's 14px rhythm, close enough to read as portfolio navigation, far enough
+   that it is plainly not one of the WORKSPACE rows. */
+.home-nav { margin-bottom: -4px; }
+
+/* The group's own name, on the strip's baseline. Reuses .side-label's typography. */
+.side-nav-label { padding: 3px 6px 4px; }
+.side-nav.is-active .side-nav-label { color: var(--accent); }
+.nav-row {
+  position: relative;
+  display: grid;
+  grid-template-columns: 22px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  min-height: 34px;
+  padding: 0 9px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--ink-dim);
+  font-size: var(--text-sm);
+  font-weight: 560;
+  text-align: left;
+}
+/* Badges float OVER the row. Absolute, centred on the row's axis, never in the grid: a count
+   that appears must not move a label, a glyph or the row beside it. */
+.nav-badge {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+  min-width: 18px;
+  padding: 2px 5px;
+  color: var(--bg);
+  background: var(--accent);
+  border-radius: 999px;
+  font-size: var(--text-xs);
+  font-weight: 750;
+  line-height: 1.2;
+  text-align: center;
+}
+/* On a 38px tile the badge rides the top-right corner, half outside it, like a dock count. */
+html.sidebar-compact .nav-badge {
+  top: -3px;
+  right: -3px;
+  transform: none;
+  min-width: 16px;
+  padding: 1px 4px;
+  font-size: var(--text-xs);
+  box-shadow: 0 0 0 2px var(--bg-sunken);
+}
+/* No .is-active for a row on purpose — see .side-nav above. Hover is all a row gets: it is a
+   jump to a tab, and the tab strip is what says where you landed. */
+.nav-row:hover { transform: none; color: var(--ink); background: color-mix(in oklab, var(--accent) 6%, var(--bg-raised)); }
+.nav-glyph {
+  width: 22px;
+  display: grid;
+  place-items: center;
+  color: var(--ink-faint);
+}
+.nav-glyph svg { width: 15px; height: 15px; }
+/* The glyphs warm together when the group is the area you are in — one signal, three rows. */
+.side-nav.is-active .nav-glyph { color: var(--accent); }
+
+.side-section { display: flex; flex-direction: column; gap: 8px; }
+.side-label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 5px;
+  color: var(--ink-faint);
+  font-size: var(--text-xs);
+  font-weight: 650;
+  letter-spacing: 0.15em;
+}
+.side-label span:last-child {
+  min-width: 18px;
+  padding: 1px 5px;
+  border-radius: 999px;
+  background: var(--bg-raised);
+  color: var(--ink-dim);
+  font-size: var(--text-xs);
+  font-weight: 650;
+  letter-spacing: 0;
+  text-align: center;
+}
+/* One scroller for the whole rail. The filter, the label, the rows, the door and the "+" scroll
+   together — they are one list, not a list with chrome bolted above and below it. Nothing here
+   stretches: the door and the "+" belong directly under the last row. The empty rail below them
+   is the point — that space is the difference between a wall of apps and a place you can find
+   your way in. Overflow-x is hidden only to swallow the list's 2px bleed. */
+.projects-section {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+
+/* The label carries the two controls that replaced auto-sorting: what is live, and what rule the
+   order obeys. Both stay quiet until wanted — this line must never out-shout the list. */
+/* flex: none — the section is a flex column that scrolls, so a shrinkable label collapses to
+   0px once the rail overflows (it did, the moment Home hid the filter above it). */
+.projects-label { flex: none; gap: 6px; }
+.projects-label > span:first-child { flex: 1; }
+.live-chip,
+.sort-chip {
+  padding: 1px 6px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink-faint);
+  font-size: var(--text-xs);
+  font-weight: 650;
+  letter-spacing: 0.08em;
+  transition: color var(--fast) var(--ease), border-color var(--fast) var(--ease),
+    background var(--fast) var(--ease);
+}
+.live-chip:hover,
+.sort-chip:hover { transform: none; color: var(--ink-dim); border-color: var(--line); }
+.live-chip { display: flex; align-items: center; gap: 4px; letter-spacing: 0; }
+/* Same as .show-all: an author `display` beats the UA's `[hidden]`, and this chip was showing a
+   pulsing "0" on a rail where nothing was running. */
+.live-chip[hidden] { display: none; }
+.live-chip i {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  /* The one moving thing in the rail. It says "something is running" without touching the order. */
+  animation: live-pulse 2s var(--ease) infinite;
+}
+.live-chip[aria-pressed="true"] {
+  border-color: color-mix(in oklab, var(--accent) 40%, var(--line));
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+@keyframes live-pulse { 50% { opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) { .live-chip i { animation: none; } }
+
+.project-filter {
+  position: relative;
+  display: flex;
+  align-items: center;
+  height: 34px;
+  flex: none;
+  border: 1px solid var(--line-soft);
+  border-radius: 9px;
+  background: color-mix(in oklab, var(--bg-raised) 52%, transparent);
+  transition: border-color var(--fast) var(--ease), background var(--fast) var(--ease);
+}
+.project-filter:focus-within {
+  border-color: color-mix(in oklab, var(--accent) 48%, var(--line));
+  background: var(--bg-raised);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+.project-filter > svg {
+  width: 14px;
+  height: 14px;
+  margin-left: 10px;
+  flex: none;
+  fill: none;
+  stroke: var(--ink-faint);
+  stroke-width: 1.8;
+  stroke-linecap: round;
+}
+.project-filter input {
+  width: 100%;
+  height: 100%;
+  padding: 0 7px;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--text-sm);
+}
+.project-filter input::placeholder { color: var(--ink-faint); }
+.project-filter input::-webkit-search-cancel-button { opacity: 0.55; }
+.project-filter kbd {
+  margin-right: 7px;
+  padding: 2px 5px;
+  flex: none;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--bg-sunken);
+  color: var(--ink-faint);
+  font: var(--text-xs) ui-monospace, Menlo, monospace;
+}
+
+/* A chord, printed where it lands: on the Terminals row, the module rail and Work's file
+   tabs. Invisible until ⌘ is held, so a screen at rest says nothing and a hand already on
+   the modifier sees the key it wants. Same look as the filter's kbd. */
+.key-hint {
+  display: inline-grid;
+  place-items: center;
+  min-width: 17px;
+  height: 16px;
+  padding: 0 4px;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--bg-sunken);
+  color: var(--ink-faint);
+  font: var(--text-xs) ui-monospace, Menlo, monospace;
+  letter-spacing: 0.02em;
+  opacity: 0;
+  transition: opacity var(--fast) var(--ease);
+}
+body.is-cmd-held .key-hint { opacity: 1; }
+.nav-row > .key-hint { position: absolute; right: 8px; }
+html.sidebar-compact .nav-row > .key-hint { display: none; }
+
+/* The portfolio. This is the app's main navigation — an agent per row, several live. */
+.project-list {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0 -2px;
+  padding: 1px 2px 5px;
+}
+
+/*
+ * Which company owns the rows under it.
+ *
+ * Only rendered when the rail holds more than one group — a header that appears above every row
+ * distinguishes nothing. So this is a divider that means something on the day it shows up, and is
+ * absent every other day. Quiet by design: it is the answer to "whose is this", never the thing
+ * you are looking for.
+ */
+.project-group {
+  padding: 12px 8px 4px;
+  font-size: var(--text-xs);
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+  user-select: none;
+}
+/* The first one caps the list rather than floating below a gap the list already has. */
+.project-group:first-child { padding-top: 2px; }
+/* Compact rail is icons only; a word there would wrap into a column of letters. */
+html.sidebar-compact .project-group {
+  padding: 8px 0 4px;
+  font-size: 0;
+  text-align: center;
+}
+html.sidebar-compact .project-group::before {
+  content: "";
+  display: block;
+  height: 1px;
+  background: var(--line);
+}
+
+/* A div, not a button: the row carries its own pin button, and a button inside a button is an
+   element the browser tears apart. Role and keys put back everything that was lost. */
+.project-row {
+  position: relative;
+  display: grid;
+  /* icon | name+status | unread | pin. The unread count owns a COLUMN of its own: it used to be
+     another <b>, so it inherited the name's `grid-column: 2` and auto-placed onto a third row —
+     the row grew a line and the pill sat under the status. */
+  grid-template-columns: 32px minmax(0, 1fr) auto auto;
+  grid-template-rows: auto auto;
+  column-gap: 10px;
+  align-items: center;
+  text-align: left;
+  background: transparent;
+  min-height: 46px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  padding: 6px 7px;
+  font: inherit;
+  cursor: pointer;
+  user-select: none;
+  touch-action: none;
+}
+.project-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
+.project-list.can-drag .project-row { cursor: grab; }
+.project-row.is-child {
+  width: calc(100% - 18px);
+  margin-left: 18px;
+}
+.project-row.is-child .project-icon::before {
+  content: "";
+  position: absolute;
+  left: -15px;
+  top: -9px;
+  width: 10px;
+  height: 25px;
+  border-left: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  border-radius: 0 0 0 7px;
+}
+.project-row.is-collection {
+  background: color-mix(in oklab, var(--accent) 5%, transparent);
+}
+.project-row.is-collection b { color: var(--ink); font-weight: 650; }
+
+/* The row's hover tools: pin, and the menu that holds everything a row can be told. Hidden until
+   you are on the row — a portfolio's worth of permanent icons is noise, and the pinned ones
+   already say what they are by sitting above the seam. */
+.project-tools {
+  grid-column: 4;
+  grid-row: 1 / span 2;
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+.project-pin,
+.project-more {
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--ink-faint);
+  opacity: 0;
+  transition: opacity var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+.project-pin svg,
+.project-more svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.project-more svg { fill: currentColor; stroke: none; }
+.project-pin:hover,
+.project-more:hover { transform: none; color: var(--ink); }
+.project-row:hover .project-pin,
+.project-row:focus-within .project-pin,
+.project-row:hover .project-more,
+.project-row:focus-within .project-more { opacity: 0.65; }
+/* While its menu is up the button stays lit, so the menu is visibly anchored to a row. */
+.project-more.is-open { opacity: 1; color: var(--ink); }
+.project-row.is-pinned .project-pin { opacity: 1; color: var(--accent); }
+.project-row.is-pinned .project-pin svg { fill: color-mix(in oklab, var(--accent) 30%, transparent); }
+/* The seam between the pinned block and the rest. It is also the wall a drag will not cross. */
+.project-row.is-pin-last { margin-bottom: 7px; }
+.project-row.is-pin-last::after {
+  content: "";
+  position: absolute;
+  left: 7px;
+  right: 7px;
+  bottom: -5px;
+  height: 1px;
+  background: var(--line-soft);
+}
+
+/* Reorder. The lifted row keeps the pointer; its neighbours slide one slot to open the gap, and
+   that gap IS the drop preview — no insertion line to decode. */
+.project-list.is-reordering .project-row { transition: transform 160ms var(--ease); }
+.project-list.is-reordering .project-row.is-dragging {
+  transition: none;
+  z-index: 3;
+  cursor: grabbing;
+  background: var(--bg-raised);
+  border-color: color-mix(in oklab, var(--accent) 26%, var(--line));
+  box-shadow: 0 10px 24px rgb(0 0 0 / 0.28);
+}
+.project-list.is-reordering .project-row:not(.is-dragging):hover { background: transparent; border-color: transparent; }
+.project-row::before {
+  content: "";
+  position: absolute;
+  left: -2px;
+  top: 12px;
+  bottom: 12px;
+  width: 2px;
+  border-radius: 2px;
+  background: var(--accent);
+  opacity: 0;
+  transform: scaleY(0.4);
+  transition: transform var(--fast) var(--ease), opacity var(--fast) var(--ease);
+}
+.project-row:hover {
+  transform: none;
+  background: color-mix(in oklab, var(--accent) 5%, var(--bg-raised));
+  border-color: var(--line-soft);
+}
+.project-row.is-active {
+  background: linear-gradient(90deg, color-mix(in oklab, var(--accent) 15%, var(--bg-raised)), var(--bg-raised));
+  border-color: color-mix(in oklab, var(--accent) 20%, var(--line-soft));
+}
+.project-row.is-active::before { opacity: 1; transform: none; }
+/* Nowrap on both lines: while the compact rail animates open they get clipped by the moving
+   edge, never rewrapped — and long names ellipsize instead of pushing the row taller. */
+/* The name only. The unread pill is a <b> too, and every rule below used to land on it. */
+.project-row b {
+  grid-column: 2;
+  font-size: var(--text-md);
+  font-weight: 560;
+  color: var(--ink-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.project-row.is-active b { color: var(--ink); }
+.project-row small {
+  grid-column: 2;
+  font-size: var(--text-xs);
+  color: var(--ink-faint);
+  letter-spacing: 0.01em;
+  white-space: nowrap;
+}
+.project-row.is-missing b { color: var(--risk); text-decoration: line-through; }
+
+.project-icon {
+  position: relative;
+  grid-row: 1 / span 2;
+  width: 32px;
+  height: 32px;
+  overflow: visible;
+  border-radius: 9px;
+  background: var(--bg-raised);
+  box-shadow: inset 0 0 0 1px var(--line);
+  /* Inert while expanded (nothing below changes); lets the tile morph into its 44px compact
+     self — and back — in step with the rail instead of snapping. */
+  transition: width var(--fast) var(--ease), height var(--fast) var(--ease),
+    border-radius var(--fast) var(--ease), transform var(--fast) var(--ease),
+    box-shadow var(--fast) var(--ease);
+}
+.project-icon img,
+.project-glyph {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: inherit;
+}
+.project-icon img { z-index: 1; display: block; object-fit: cover; }
+.project-glyph {
+  display: grid;
+  place-items: center;
+  color: var(--ink-faint);
+  font-size: var(--text-xs);
+  font-weight: 650;
+}
+
+/* The dot is the whole status language: dim = idle, accent = working. */
+.project-row .dot {
+  position: absolute;
+  z-index: 2;
+  right: -2px;
+  bottom: -2px;
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--line);
+  box-shadow: 0 0 0 2px var(--bg-sunken);
+  transition: background var(--fast) var(--ease);
+}
+
+.project-filter-empty {
+  margin: 8px 2px;
+  padding: 22px 10px;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  color: var(--ink-faint);
+  font-size: var(--text-xs);
+  line-height: 1.45;
+  text-align: center;
+}
+.project-row.is-running .dot { background: var(--accent); }
+.project-row.is-running small { color: var(--accent); }
+/* Louder than running, in this order: a finished turn you have not seen, then an agent parked on
+   you. Amber pulses because it is blocking work; green holds still because nothing is waiting. */
+.project-row.is-done .dot { background: var(--ok); }
+.project-row.is-done small { color: var(--ok); }
+.project-row.is-asking .dot {
+  background: var(--warn);
+  animation: project-dot-ask 1.6s var(--ease) infinite;
+}
+.project-row.is-asking small { color: var(--warn); }
+@keyframes project-dot-ask {
+  0%, 100% { box-shadow: 0 0 0 2px var(--bg-sunken), 0 0 0 2px color-mix(in srgb, var(--warn) 0%, transparent); }
+  50%      { box-shadow: 0 0 0 2px var(--bg-sunken), 0 0 0 5px color-mix(in srgb, var(--warn) 35%, transparent); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .project-row.is-asking .dot { animation: none; }
+}
+/* The door to the rest of the portfolio. It scrolls with the list rather than sitting under it,
+   and it borrows the project row's geometry exactly — same
+   32px icon column, same 46px height, same rhythm. It reads as the sixth row and it is as easy
+   to hit as one; only the colour says it is a control and not an app. */
+.show-all {
+  display: grid;
+  grid-template-columns: 32px minmax(0, 1fr);
+  column-gap: 10px;
+  align-items: center;
+  width: 100%;
+  min-height: 46px;
+  margin-top: 1px;
+  padding: 6px 7px;
+  border: 1px solid transparent !important;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--ink-faint);
+  text-align: left;
+}
+/* `display: grid` from an author sheet outranks the UA's `[hidden]` rule, so the attribute has to
+   be honoured by hand — otherwise the button stays on screen while a filter is narrowing. */
+.show-all[hidden] { display: none; }
+/* The icon slot answers the project icons above it: same square, dashed because there is nothing
+   behind it yet. */
+.show-all-glyph {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border: 1px dashed var(--line);
+  border-radius: 9px;
+  transition: border-color var(--fast) var(--ease), background var(--fast) var(--ease);
+}
+.show-all svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  transition: transform var(--fast) var(--ease);
+}
+.show-all.is-open svg { transform: rotate(180deg); }
+.show-all-text { display: grid; gap: 1px; min-width: 0; }
+.show-all-text b {
+  font-size: var(--text-sm);
+  font-weight: 560;
+  letter-spacing: -0.005em;
+}
+.show-all-text small { font-size: var(--text-xs); color: var(--ink-faint); opacity: 0.75; }
+.show-all:hover {
+  transform: none;
+  color: var(--accent);
+  border-color: color-mix(in oklab, var(--accent) 30%, var(--line)) !important;
+  background: var(--accent-soft);
+}
+.show-all:hover .show-all-glyph {
+  border-color: color-mix(in oklab, var(--accent) 45%, var(--line));
+  background: var(--bg-raised);
+}
+.show-all:focus-visible { outline: 2px solid var(--accent); outline-offset: -1px; }
+@media (prefers-reduced-motion: reduce) { .show-all svg { transition: none; } }
+
+.add-project {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 34px;
+  margin-top: 1px;
+  font-size: var(--text-xs);
+  font-weight: 560;
+  padding: 5px 8px;
+  color: var(--ink-faint);
+  border-style: dashed !important;
+  border-color: var(--line-soft) !important;
+}
+.add-project svg {
+  width: 15px;
+  height: 15px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+}
+.add-project:hover { transform: none; color: var(--accent); border-color: color-mix(in oklab, var(--accent) 38%, var(--line)) !important; background: var(--accent-soft); }
+
+.side-foot {
+  display: flex; align-items: center; justify-content: flex-end; gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line-soft);
+  font-size: var(--text-xs); color: var(--ink-faint);
+}
+.side-foot .ghost { padding: 4px 8px; font-size: var(--text-xs); }
+.side-foot-right { display: inline-flex; align-items: center; gap: 8px; }
+/* The theme switch. A single glyph, no lift on hover — it is chrome, not a primary action.
+   The icon flips (◐ ↔ ◑) in main.ts so the button shows which way it will go. */
+.theme-toggle { padding: 5px; font-size: var(--text-sm); line-height: 1; color: var(--ink-faint); }
+.theme-toggle .ui-icon { width: 14px; height: 14px; }
+.theme-toggle:hover { transform: none; color: var(--ink-dim); border-color: var(--line); }
+.health {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  border: 1px solid var(--line-soft);
+  border-radius: 999px;
+  background: color-mix(in oklab, var(--bg-raised) 50%, transparent);
+}
+/* Static. "Healthy" is the resting truth, and a truth that never changes does not need to
+   throb to prove it. The pulse canvas is the ONE continuous motion in the shell. */
+.health-dot {
+  width: 5px; height: 5px; border-radius: 50%; background: var(--ok);
+  opacity: 0.75;
+}
+
+/* ------------------------------------------------- sidebar, compact rail */
+
+/* Icon-only mode, 72px: a dock. 44px squircle tiles carry the portfolio, a left-edge accent
+   pill says where you are, and glow rings say which tiles are alive. Everything textual
+   folds away. Rules key off html.sidebar-compact — see #app for why <html>, not <body>. */
+html.sidebar-compact .sidebar { padding: 10px 8px 8px; gap: 8px; }
+
+/* The brand stacks: mark on top, chevron under it — the two survivors of the header row. */
+html.sidebar-compact .brand { flex-direction: column; gap: 4px; padding: 0; }
+html.sidebar-compact .brand > span:not(.brand-mark) { display: none; }
+html.sidebar-compact .sidebar-toggle { margin-left: 0; }
+html.sidebar-compact .brand-mark { width: 38px; height: 38px; border-radius: 12px; }
+
+/* Home becomes the dock's home-base tile: a 44px accent squircle with its glyph centered,
+   matching the project tiles' geometry. It inherits the base button's accent fill, so it stays
+   the one filled tile up top — a clear "home" anchor — instead of a shrunken 13px lozenge. */
+html.sidebar-compact .nav-row {
+  width: 38px; height: 38px; margin: 0 auto; padding: 0;
+  display: grid; place-items: center;
+  border-radius: 12px; font-size: 0;
+  /* The base row clips for its label; the tile has none, and its badge hangs off the corner. */
+  overflow: visible;
+}
+html.sidebar-compact .nav-glyph { font-size: var(--text-lg); line-height: 1; }
+html.sidebar-compact .nav-glyph svg { width: 16px; height: 16px; }
+/* Eight nav rows now sit above the projects. At 44px each the dock ate the whole rail on a
+   laptop and the projects were left a slot or two. 38px tiles and 2px gaps give the portfolio
+   its height back while the tile still reads as a target. The group box stays — it is the only
+   thing left saying "you are in the workspace" once the labels are gone. */
+html.sidebar-compact .side-nav { gap: 2px; padding: 3px; border-color: transparent; background: transparent; }
+html.sidebar-compact .home-nav { margin-bottom: -6px; }
+html.sidebar-compact .side-nav-label { margin: 3px 8px; }
+html.sidebar-compact .side-nav.is-active {
+  border-color: color-mix(in oklab, var(--accent) 30%, transparent);
+  background: color-mix(in oklab, var(--accent) 9%, var(--bg-raised));
+}
+
+/* The PROJECTS label becomes a hairline — a divider still earns its keep at this width. */
+html.sidebar-compact .project-filter { display: none; }
+/* Home's finder is the one project search while Home is up. */
+.projects-section.home-up .project-filter { display: none; }
+html.sidebar-compact .side-label {
+  font-size: 0; height: 1px; background: var(--line-soft); margin: 2px 6px;
+  padding: 0;
+}
+html.sidebar-compact .side-label span { display: none; }
+/* In the 80px rail the label is a hairline, so its chips go with it — and a 22px pin target next
+   to a 44px tile would be a coin toss. Reordering and pinning stay a wide-rail act. */
+html.sidebar-compact .live-chip,
+html.sidebar-compact .sort-chip,
+html.sidebar-compact .project-tools { display: none; }
+/* Pinned tiles keep their meaning without the seam: a soft ring, no extra row of chrome. */
+html.sidebar-compact .project-row.is-pin-last { margin-bottom: 10px; }
+html.sidebar-compact .project-row.is-pin-last::after { left: 14px; right: 14px; bottom: -6px; }
+html.sidebar-compact .project-row.is-pinned .project-icon {
+  box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--accent) 45%, var(--line));
+}
+
+/* The dock scrolls (a portfolio can be long), but a native scrollbar in an 80px rail collides
+   with the tiles and steals the width they need — so hide it and keep the scroll. The base
+   list bleeds -4px into the gutter for the wide rows; here it sits centered with symmetric
+   padding so the tiles have room for their status dots instead of being clipped at the edge. */
+html.sidebar-compact .project-list {
+  margin: 0;
+  padding: 2px 8px;
+  gap: 8px;
+}
+html.sidebar-compact .projects-section { scrollbar-width: none; }
+html.sidebar-compact .projects-section::-webkit-scrollbar { width: 0; height: 0; }
+
+/* Dock tiles: the 28px list icon grows into a 44px squircle and IS the row. The full-width
+   hover wash goes; at this size the tile answers hover itself, like a dock icon should. Row
+   padding is 0 — the list's gap does the spacing, so tiles never touch. */
+html.sidebar-compact .project-row {
+  grid-template-columns: 44px;
+  grid-template-rows: auto;
+  justify-content: center;
+  column-gap: 0;
+  padding: 0;
+  /* Hold the 44px height. Without this the flex column shrinks every row once the portfolio
+     overflows the rail, but the icon keeps its size and spills into its neighbours — the tiles
+     appeared to overlap. Pinned open, the list scrolls (its bar is hidden) instead. */
+  flex: 0 0 auto;
+}
+html.sidebar-compact .project-row.is-child { width: 100%; margin-left: 0; }
+html.sidebar-compact .project-row.is-child .project-icon::before { display: none; }
+html.sidebar-compact .project-row.is-child .project-icon { transform: scale(0.84); opacity: 0.86; }
+html.sidebar-compact .project-row:hover,
+html.sidebar-compact .project-row.is-active { background: transparent; }
+html.sidebar-compact .project-row { border: 0; min-height: 44px; }
+html.sidebar-compact .project-row::before { display: none; }
+html.sidebar-compact .project-row .project-icon {
+  grid-row: 1;
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+}
+html.sidebar-compact .project-glyph { font-size: var(--text-lg); }
+html.sidebar-compact .project-row b,
+html.sidebar-compact .project-row small { display: none; }
+
+/* Hover life + state rings, quietest to loudest so the later rule wins the shared corner:
+   running wears a soft accent bloom (live, but not where you are), active wears the full
+   accent ring. All washes come from --accent-soft and the state hues, so both themes keep
+   their manners. */
+html.sidebar-compact .project-row:hover .project-icon { transform: translateY(-1px) scale(1.04); }
+html.sidebar-compact .project-row.is-running .project-icon {
+  box-shadow: inset 0 0 0 1px var(--line), 0 0 12px 2px var(--accent-soft);
+}
+html.sidebar-compact .project-row.is-active .project-icon {
+  box-shadow: 0 0 0 1px var(--accent), 0 0 14px var(--accent-soft);
+}
+/* The dot scales with the tile and tucks into the squircle corner; the halo carves it out. */
+html.sidebar-compact .project-row .dot {
+  width: 9px; height: 9px;
+  right: -1px; bottom: -1px;
+  box-shadow: 0 0 0 2.5px var(--bg-sunken);
+}
+
+/* In the dock the door becomes a tile like every other row: the same 44px squircle, holding the
+   chevron. The words go — at this width the tiles have no names either. */
+html.sidebar-compact .show-all {
+  display: block;
+  width: 44px;
+  height: 44px;
+  margin: 6px auto 0;
+  padding: 0;
+  border: 0 !important;
+  background: transparent;
+}
+html.sidebar-compact .show-all[hidden] { display: none; }
+html.sidebar-compact .show-all-text { display: none; }
+html.sidebar-compact .show-all-glyph {
+  width: 44px;
+  height: 44px;
+  border-radius: 14px;
+}
+html.sidebar-compact .show-all:hover { background: transparent; }
+html.sidebar-compact .show-all svg { width: 18px; height: 18px; }
+
+/* "+" becomes a small tile of its own, keeping the dock's geometry. */
+html.sidebar-compact .add-project {
+  width: 44px;
+  height: 44px;
+  margin: 6px auto 0;
+  padding: 0;
+  border-radius: 14px;
+}
+html.sidebar-compact .add-project span { display: none; }
+html.sidebar-compact .add-project svg { width: 18px; height: 18px; }
+
+/* The footer stacks; "local" hides but its dot keeps testifying. */
+html.sidebar-compact .side-foot { justify-content: center; padding-top: 10px; }
+html.sidebar-compact .side-foot-right { flex-direction: column; gap: 8px; }
+html.sidebar-compact .health { width: 28px; height: 28px; justify-content: center; padding: 0; font-size: 0; gap: 0; }
+
+/* ------------------------------------------------------------------- main */
+
+/* Each project tab owns the full content area. */
+.main {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  background: var(--bg);
+}
+
+.main-head {
+  border-bottom: 1px solid var(--line);
+  background: var(--bg-raised);
+}
+
+/* Row one: whose project this is, then every door into it, then what you can do to it. */
+.modrail {
+  display: flex;
+  align-items: stretch;
+  gap: 14px;
+  padding-left: 12px;
+  min-height: 46px;
+}
+
+.project-title {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-width: 110px;
+  max-width: 210px;
+  padding: 5px 0;
+}
+.project-title b { display: block; font-size: var(--text-md); letter-spacing: -0.01em; }
+.project-title small {
+  display: block;
+  font-size: var(--text-xs);
+  color: var(--ink-faint);
+  font-family: ui-monospace, Menlo, monospace;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+/* Scroll controls expose project tabs beyond the visible rail. */
+.mtabs-wrap { position: relative; display: flex; flex: 1; min-width: 0; }
+.mtabs-scroll {
+  position: absolute;
+  z-index: 2;
+  top: 0; bottom: 0;
+  width: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: var(--bg-raised);
+  color: var(--ink-dim);
+  font-size: var(--text-2xl);
+  line-height: 1;
+}
+.mtabs-scroll:hover { color: var(--ink); background: var(--bg-raised); transform: none; }
+.mtabs-scroll:disabled { opacity: 0.35; cursor: default; }
+.mtabs-scroll[hidden] { display: none; }
+.mtabs-scroll.is-left { left: 0; }
+.mtabs-scroll.is-right { right: 0; }
+
+/* Flush segments, no gaps. The modules are ONE thing with parts, not five loose buttons —
+   which is the whole reason they now read as a rail and not as scattered chrome. */
+.mtabs {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  align-items: stretch;
+  padding-inline: 24px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+}
+.mtabs::-webkit-scrollbar { display: none; }
+
+/*
+ * One segment. `--m` is the module's hue, set by the `.m-*` classes below, and EVERYTHING the
+ * segment says in colour reads from it — so a new module is a hue and a class, not a new rule.
+ *
+ * The top border is transparent rather than absent: a coloured 2px border on the active segment
+ * must not shove the row down by 2px when it appears.
+ */
+.mtab {
+  --m: var(--ink-faint);
+  /* Never shrink: a squeezed tab overlaps its neighbour. Too many tabs scroll, and the arrows
+     beside the rail appear for exactly that case. */
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 13px;
+  background: transparent;
+  border: 0;
+  border-top: 2px solid transparent;
+  border-radius: 0;
+  position: relative; /* the badge anchors here, over the icon */
+  box-shadow: inset -1px 0 0 var(--line-soft);
+  color: var(--ink-dim);
+  font-size: var(--text-sm);
+  font-weight: 500;
+  white-space: nowrap;
+  transition: color var(--fast) var(--ease), background var(--fast) var(--ease);
+}
+/* Segments do not lift on hover — the row is a surface, and a surface whose pieces jump is a
+   surface you do not trust. Hover is a wash, and it is the module's own colour. */
+.mtab:hover {
+  transform: none;
+  color: var(--ink);
+  background: color-mix(in oklab, var(--m) 9%, transparent);
+}
+.mtab[hidden] { display: none; }
+.mtab:active { transform: none; }
+
+/* The icon carries the hue even when the segment is at rest, dimmed. That is what makes the rail
+   colourful without making it loud: five quiet colours, and the one you are on lights up. */
+.mtab-ico {
+  width: 15px;
+  height: 15px;
+  display: grid;
+  place-items: center;
+  font-size: var(--text-md);
+  font-style: normal;
+  line-height: 1;
+  color: var(--m);
+  opacity: 0.62;
+  transition: opacity var(--fast) var(--ease), transform var(--fast) var(--ease);
+}
+.mtab-ico svg { width: 15px; height: 15px; }
+.mtab:hover .mtab-ico { opacity: 0.9; }
+
+.mtab.is-active {
+  color: var(--ink);
+  border-top-color: var(--m);
+  /* The active segment dissolves into the pane below it — same surface, no seam. */
+  background: linear-gradient(
+    to bottom,
+    color-mix(in oklab, var(--m) 15%, transparent),
+    var(--bg) 85%
+  );
+}
+.mtab.is-active .mtab-ico { opacity: 1; transform: scale(1.06); }
+.mtab.is-active .mtab-name { color: var(--ink); }
+
+/* Whose hue is whose. */
+.m-term { --m: var(--m-term); }
+.m-dash { --m: var(--m-dash); }
+.m-work { --m: var(--m-work); }
+.m-debug { --m: var(--m-debug); }
+.m-git  { --m: var(--m-git); }
+.m-spine  { --m: var(--m-spine); }
+.m-rel  { --m: var(--m-rel); }
+.m-rc  { --m: var(--m-rc); }
+.m-an  { --m: var(--m-an); }
+.m-std  { --m: var(--m-std); }
+.m-extension { --m: var(--accent); }
+.extension-glyph { font-size: var(--text-xs); }
+
+/* Something is waiting on this module. A count when there is one to give, a dot when the fact is
+   simply "yes" — an unpushed repo has no number worth printing on a rail. */
+.badge {
+  /* Over the icon's top-right corner, out of the flex flow: a segment keeps its width whether
+     it wears a count or not, so the strip never shuffles when something starts waiting. */
+  position: absolute;
+  top: 4px;
+  left: 21px;
+  min-width: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  line-height: 14px;
+  box-shadow: 0 0 0 2px var(--bg);
+  background: var(--m);
+  color: var(--on-accent);
+  font-size: var(--text-xs);
+  font-weight: 700;
+  text-align: center;
+  animation: pop var(--base) var(--ease);
+}
+/* A CLASS beats the UA's `[hidden] { display: none }`, so `badge.hidden = true` in the spine does
+   nothing without this and every quiet module wears a "0". Same trap as `.pane[hidden]` above. */
+.badge[hidden] { display: none; }
+
+.mtab-dot {
+  width: 6px; height: 6px;
+  border-radius: 50%;
+  background: var(--m);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--m) 16%, transparent);
+}
+.mtab-dot[hidden] { display: none; }
+
+@keyframes pop {
+  from { transform: scale(0.4); opacity: 0; }
+  to   { transform: scale(1);   opacity: 1; }
+}
+
+.main-actions {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 12px 0 8px;
+}
+.main-actions button { font-size: var(--text-xs); padding: 5px 10px; }
+.start-agent-error {
+  max-width: 260px;
+  overflow: hidden;
+  color: var(--risk);
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.start-agent-error[hidden] { display: none; }
+
+/* One cell, all five panes stacked in it — only the selected one is shown. Without the explicit
+   single row/column the panes would each get an implicit ROW and the whole deck would render
+   at once, stacked down the screen. */
+.main-panes {
+  display: grid;
+  grid-template: minmax(0, 1fr) / minmax(0, 1fr);
+  overflow: hidden;
+}
+.main-panes > .pane { grid-area: 1 / 1; }
+.pane { overflow: hidden; }
+
+/* Every pane class carries its own `display:` (flex/grid), and a CLASS beats the UA's
+   `[hidden] { display: none }`. Without this, `pane.hidden = true` in setTab() does nothing
+   and every tab paints on top of every other one. Do not remove. */
+.pane[hidden] { display: none !important; }
+.dash-pane, .git-pane, .release-pane, .revenuecat-pane { overflow-y: auto; }
+/* Product Spine is the module's own app in an iframe — it owns its whole surface. */
+.product-spine-pane { display: grid; }
+.extension-pane { display: grid; background: var(--bg); }
+.extension-frame { width: 100%; height: 100%; border: 0; background: var(--bg); }
+.main.is-collection { grid-template-rows: auto minmax(0, 1fr); }
+.main.is-collection .main-actions,
+.main.is-collection .terminal-zone { display: none; }
+
+/* --------------------------------------------------------------- terminal */
+
+.terms-pane {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+}
+.terminal-zone {
+  display: grid;
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
+  grid-template-rows: auto minmax(0, 1fr);
+  background: var(--bg-sunken);
+}
+
+.sessionstrip[hidden] { display: none; }
+/* Without the strip the host is the only row, and it must still take the full height. */
+.terminal-zone:has(> .sessionstrip[hidden]) { grid-template-rows: minmax(0, 1fr); }
+
+/* One mount per project, all alive; only the selected one is shown. */
+.terminal-host {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.terminal-mount {
+  position: absolute;
+  inset: 0;
+  padding: 6px 8px 8px;
+  overflow: hidden;
+}
+.terminal-mount[hidden] { display: none; }
+
+/* No terminal yet: one message and one start, centred where the terminal will appear. */
+.terminal-empty {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 10px;
+  color: var(--ink-dim);
+  font-size: var(--text-md);
+}
+.terminal-empty[hidden] { display: none; }
+.terminal-empty b { color: var(--ink); font-weight: 600; }
+.terminal-empty small { color: var(--ink-faint); font-size: var(--text-sm); }
+.terminal-empty button {
+  padding: 8px 16px;
+  color: var(--on-accent);
+  background: var(--accent);
+  border: 0;
+  border-radius: 8px;
+  font-weight: 650;
+}
+
+/* Dragging a file over a wall of identical black rectangles: this is the one that will take it. */
+.terminal-mount.is-drop::after {
+  content: "";
+  position: absolute;
+  inset: 2px;
+  z-index: 8;
+  pointer-events: none;
+  border: 2px dashed var(--accent);
+  border-radius: 8px;
+  background: color-mix(in oklab, var(--accent) 10%, transparent);
+}
+
+/* A copy and a pasted path both produce no terminal output, so without this the key looks dead.
+   Bottom-right: the find bar owns the top, and the last line of output owns the left. */
+/* Same corner and voice as the flash badge, but it stays: an ended session is a state, not news. */
+.term-ended-bar {
+  position: absolute;
+  right: 14px;
+  bottom: 10px;
+  z-index: 7;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 4px 4px 4px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--bg-raised);
+  color: var(--ink-dim);
+  font-size: var(--text-sm);
+  box-shadow: 0 6px 18px rgb(0 0 0 / 0.18);
+  --mo-dur: 0.18s;
+}
+.term-ended-bar button {
+  padding: 3px 12px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: var(--text-sm);
+  font-weight: 650;
+}
+.term-ended-bar button:disabled { opacity: 0.6; }
+
+.term-flash {
+  position: absolute;
+  right: 14px;
+  bottom: 10px;
+  z-index: 7;
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--bg-raised);
+  color: var(--ink-dim);
+  font-size: var(--text-xs);
+  pointer-events: none;
+  --mo-dur: 0.14s;
+}
+
+/* A destructive prompt must point back to the terminal it names — so it is not an app-modal at
+   all: the question is asked INSIDE the PTY mount. The mount follows its session into the
+   project view or a wall tile, so the prompt always lands on the exact terminal being discussed,
+   and the rest of the app stays live behind it. */
+.terminal-mount .term-confirm {
+  position: absolute;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 14px;
+  border: 2px solid color-mix(in oklab, var(--risk) 72%, transparent);
+  background: color-mix(in oklab, var(--risk) 14%, rgb(3 5 10 / 0.66));
+  box-shadow: inset 0 0 70px color-mix(in oklab, var(--risk) 20%, transparent);
+  backdrop-filter: blur(2px);
+  outline: none;
+  --mo-dur: 0.16s;
+}
+
+/* The app's own icon, oversized and dropped behind the card, with its shadow doing the work:
+   a wall of terminals all look alike, and this says whose is about to die without a word. */
+.term-confirm-seal {
+  position: relative;
+  flex: 0 1 auto;
+  /* Height-driven so it simply gets smaller in a short wall tile instead of pushing the card
+     out of the pane; % of a flex item's height needs no container query. */
+  height: min(30%, 104px);
+  aspect-ratio: 1;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 24%;
+  opacity: 0.55;
+  filter: drop-shadow(0 14px 26px rgb(0 0 0 / 0.75));
+  pointer-events: none;
+}
+.term-confirm-seal img {
+  position: absolute;
+  inset: 0;
+  width: 100%; height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+}
+/* Stands in until the real icon loads — or forever, for an app that has none. */
+.term-confirm-letter {
+  font-size: clamp(18px, 5vw, 56px);
+  font-weight: 800;
+  line-height: 1;
+  color: rgb(255 255 255 / 0.92);
+}
+
+.term-confirm-card {
+  position: relative;
+  z-index: 1;
+  max-width: 340px;
+  padding: 14px 16px 12px;
+  border: 1px solid var(--line-soft);
+  border-radius: 12px;
+  background: color-mix(in oklab, var(--bg-sunken) 92%, transparent);
+  box-shadow: 0 18px 60px rgb(0 0 0 / 0.55);
+  text-align: center;
+}
+.term-confirm-title {
+  display: block;
+  font-size: var(--text-md);
+  font-weight: 650;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+}
+.term-confirm-note {
+  display: block;
+  margin-top: 4px;
+  font-size: var(--text-xs);
+  color: var(--ink-dim);
+}
+.term-confirm-row {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  margin-top: 12px;
+}
+.term-confirm-row .dlg-btn { white-space: nowrap; }
+.term-confirm-row .dlg-btn:focus-visible {
+  outline: 2px solid color-mix(in oklab, var(--accent) 70%, transparent);
+  outline-offset: 2px;
+}
+
+/* A wall tile can be small. Everything above is sized off the pane (%, vw, clamp) so the prompt
+   shrinks with its terminal; the card keeps its background and sits over the seal either way. */
+.term-confirm-card { flex: 0 1 auto; min-height: 0; overflow: auto; }
+
+/* ⌘F's find bar. It rides inside the mount, top-right, so on the wall it is obvious WHICH tile
+   is being searched. Small, dense, and out of the way of the first line of output. */
+.term-find {
+  position: absolute;
+  top: 6px;
+  right: 14px;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 5px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg-raised);
+  box-shadow: 0 6px 18px rgb(0 0 0 / 0.35);
+}
+.term-find-input {
+  width: 148px;
+  padding: 3px 6px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  font-size: var(--text-sm);
+  outline: none;
+}
+.term-find-input:focus { border-color: var(--accent); }
+.term-find.is-empty .term-find-input { border-color: var(--risk); }
+.term-find-count {
+  min-width: 34px;
+  color: var(--ink-dim);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+.term-find-btn {
+  padding: 2px 6px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink-dim);
+  font-size: var(--text-sm);
+  line-height: 1.2;
+  cursor: pointer;
+}
+.term-find-btn:hover { background: var(--bg); color: var(--ink); }
+
+/* Per-project containers. `display: contents` keeps them out of the layout entirely, so a
+   project's nodes sit in their host's own flow as if the wrapper were not there. */
+.own { display: contents; }
+
+/* ----------------------------------------------------------------- motion */
+
+/* The one entrance. transform+opacity only — costs a composite, not a layout. */
+.enter { animation: enter var(--base) var(--ease) both; }
+@keyframes enter {
+  from { transform: translateY(-6px); opacity: 0; }
+  to   { transform: none;             opacity: 1; }
+}
+
+.view-raw {
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: var(--pad);
+  background: var(--bg-raised);
+}
+.view-raw header { font-size: var(--text-xs); color: var(--risk); margin-bottom: 6px; }
+.view-raw pre {
+  margin: 0;
+  font-size: var(--text-xs);
+  color: var(--ink-dim);
+  overflow-x: auto;
+}
+
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-thumb { background: var(--line); border-radius: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}
+
+/* ---------------------------------------------------------------- inbox rows
+   Reports, Manager and Support are what the agents and the users said. They wear the same box
+   and label as every other group, so the sidebar reads as one list of groups. */
+.nav-row.is-on { color: var(--ink); }
+.nav-row.is-on .nav-glyph { color: var(--accent); }
+.nav-row:not(.is-on) .nav-glyph { opacity: .6; }
+
+/* DESK's and INBOX's rows are separate destinations, so the group's lit box must not warm every
+   glyph the way WORKSPACE's does. Only the row you are on keeps the accent. */
+.plan-nav.is-active .nav-glyph,
+.chat-nav.is-active .nav-glyph { color: var(--ink-faint); }
+.side-nav .nav-row.is-on .nav-glyph { color: var(--accent); }
+
+/*
+ * The project row's menu. Fixed to the viewport, not the rail: the rail scrolls and clips, and a
+ * menu that scrolls away from the row it belongs to is worse than no menu.
+ */
+.row-menu {
+  position: fixed;
+  z-index: 60;
+  min-width: 184px;
+  max-height: 60vh;
+  overflow-y: auto;
+  display: grid;
+  gap: 1px;
+  padding: 6px;
+  background: var(--bg-raised);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 18px 46px rgba(0, 0, 0, 0.34);
+}
+.row-menu[hidden] { display: none; }
+.row-menu-label {
+  margin: 4px 6px 3px;
+  color: var(--ink-faint);
+  font-size: var(--text-xs);
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+.row-menu-sep { margin: 4px 6px; height: 1px; background: var(--line); }
+/* Above everything a terminal can sit in: zoomed tiles, the wall, dialog veils. */
+.term-menu { min-width: 168px; z-index: 2147483000; }
+.row-menu-item.term-menu-item { grid-template-columns: minmax(0, 1fr) auto; }
+.row-menu-item.term-menu-item kbd { color: var(--ink-faint); font: inherit; font-size: var(--text-xs); }
+.row-menu-item.term-menu-item:disabled { opacity: 0.45; cursor: default; background: transparent; }
+.row-menu-item {
+  display: grid;
+  grid-template-columns: 14px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  color: var(--ink-dim);
+  background: transparent;
+  border: 0;
+  border-radius: 7px;
+  font: inherit;
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+.row-menu-item:hover { color: var(--ink); background: color-mix(in oklab, var(--ink) 6%, transparent); }
+.row-menu-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.row-menu-item.is-on { color: var(--ink); font-weight: 600; }
+/* The tick lives in its own column, so every label starts on the same line whether it is the
+   current group or not. */
+.row-menu-item i { color: var(--accent); font-style: normal; text-align: center; }
+.row-menu-item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.row-menu-item.is-new { color: var(--ink-faint); }
+.row-menu-item.is-new:hover { color: var(--accent); }
+
+/* A screen that failed to open. One sentence, the reason when Rust wrote one, Try again, and the
+   raw error folded away for a bug report. See errors.ts. */
+.error-note {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  max-width: 560px;
+  padding: 24px 28px;
+  color: var(--ink);
+  font-size: var(--text-md);
+}
+.error-note p { margin: 0; }
+.error-note-lead { font-weight: 650; }
+.error-note-reason { color: var(--ink-dim); line-height: 1.5; }
+.error-note details { color: var(--ink-faint); font-size: var(--text-xs); }
+.error-note summary { cursor: pointer; }
+.error-note pre {
+  margin: 6px 0 0;
+  white-space: pre-wrap;
+  font-family: ui-monospace, Menlo, monospace;
+}
+.panel-boot .error-note { justify-items: center; padding: 0; color: inherit; }

@@ -1,0 +1,85 @@
+/* The Servers board. It lives inside a Settings card, so it inherits that card's frame and
+   brings only the row language of its own: one dot per server, and what actually failed. */
+
+.set-servers { --m: #5ec8d8; display: flex; flex-direction: column; gap: 8px; }
+
+.sh-bar { display: flex; align-items: baseline; gap: 10px; }
+.sh-tally { font-size: var(--text-sm); font-weight: 650; font-variant-numeric: tabular-nums; }
+.sh-tally.sh-ok { color: var(--ok); }
+.sh-tally.sh-warn { color: var(--warn); }
+.sh-tally.sh-bad { color: var(--risk); }
+.sh-stamp { font-size: var(--text-xs); color: var(--ink-faint); }
+
+.sh-refresh {
+  margin-left: auto;
+  background: color-mix(in oklab, var(--m) 22%, var(--bg-raised));
+  border: 1px solid color-mix(in oklab, var(--m) 38%, var(--line));
+  color: var(--ink); font-weight: 650; font-size: var(--text-sm); font-family: inherit;
+  padding: 5px 12px; border-radius: var(--radius-sm, 6px); cursor: pointer;
+  transition: background var(--fast, 140ms) var(--ease, ease);
+}
+.sh-refresh:hover:not(:disabled) { background: color-mix(in oklab, var(--m) 34%, var(--bg-raised)); }
+.sh-refresh:disabled { opacity: 0.6; cursor: default; }
+
+.sh-list { display: flex; flex-direction: column; gap: 5px; }
+
+.sh-row {
+  display: grid; grid-template-columns: 9px minmax(130px, 220px) 1fr auto;
+  align-items: center; gap: 12px;
+  padding: 9px 12px;
+  background: var(--bg-sunken);
+  border: 1px solid var(--line-soft);
+  border-radius: var(--radius-sm, 8px);
+}
+
+.sh-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-faint); }
+.sh-up .sh-dot { background: var(--ok); }
+.sh-degraded .sh-dot { background: var(--warn); }
+.sh-down .sh-dot { background: var(--risk); }
+.sh-skipped { opacity: 0.5; }
+
+.sh-name { min-width: 0; }
+.sh-label { font-size: var(--text-md); font-weight: 650; color: var(--ink); }
+.sh-url {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: var(--text-xs);
+  color: var(--ink-faint); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.sh-detail { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.sh-muted { font-size: var(--text-xs); color: var(--ink-dim); font-variant-numeric: tabular-nums; }
+.sh-fail { font-size: var(--text-xs); color: var(--risk); word-break: break-word; }
+.sh-degraded .sh-fail { color: var(--warn); }
+
+.sh-one {
+  background: transparent; border: 1px solid var(--line); color: var(--ink-dim);
+  font-size: var(--text-xs); font-family: inherit; font-weight: 600;
+  padding: 3px 9px; border-radius: var(--radius-sm, 6px); cursor: pointer;
+  transition: color var(--fast, 140ms) var(--ease, ease),
+              border-color var(--fast, 140ms) var(--ease, ease);
+}
+.sh-one:hover:not(:disabled) { color: var(--ink); border-color: color-mix(in oklab, var(--m) 45%, var(--line)); }
+.sh-one:disabled { opacity: 0.4; cursor: default; }
+
+.sh-foot .sh-path {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: var(--text-xs); color: var(--ink-faint);
+}
+
+/* Nothing configured — the first thing most people will see, so it teaches rather than apologises. */
+.sh-empty {
+  padding: 16px 14px;
+  background: var(--bg-sunken);
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-sm, 8px);
+}
+.sh-empty-line { font-size: var(--text-md); font-weight: 650; color: var(--ink); }
+.sh-empty-hint { margin-top: 5px; font-size: var(--text-sm); line-height: 1.55; color: var(--ink-dim); }
+.sh-empty-cmd {
+  display: inline-block; margin-top: 10px;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: var(--text-xs);
+  color: color-mix(in oklab, var(--m) 65%, var(--ink));
+  background: var(--bg-raised); border: 1px solid var(--line);
+  border-radius: var(--radius-sm, 6px); padding: 4px 9px;
+}
+
+.sh-error { padding: 18px; text-align: center; color: var(--risk); font-size: var(--text-sm); }
