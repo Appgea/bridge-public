@@ -137,15 +137,7 @@ fn write(store: &Store) {
 }
 
 fn pid_alive(pid: u32) -> bool {
-    if pid == 0 {
-        return false;
-    }
-    // `kill -0` is the portable liveness question, and the only one that does not need a crate.
-    std::process::Command::new("kill")
-        .args(["-0", &pid.to_string()])
-        .output()
-        .map(|out| out.status.success())
-        .unwrap_or(false)
+    crate::platform::pid_alive(pid)
 }
 
 /// Drop every lease whose holder is gone, shutting down the simulators we booted for them.

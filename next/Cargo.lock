@@ -48,6 +48,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2a4385e2e34eb35d6b3efe798b9eb88096925d87726c0798709bf56d9ed84af3"
 
 [[package]]
+name = "appgea-panel-desktop"
+version = "0.1.0"
+dependencies = [
+ "base64 0.22.1",
+ "notify",
+ "panel-core",
+ "panel-ingress",
+ "panel-store",
+ "panel-terminal",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-notification",
+ "toml 0.9.12+spec-1.1.0",
+ "uuid",
+]
+
+[[package]]
 name = "ascii"
 version = "1.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -290,67 +310,6 @@ dependencies = [
  "futures-io",
  "futures-lite",
  "piper",
-]
-
-[[package]]
-name = "panel-core"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
- "uuid",
-]
-
-[[package]]
-name = "panel-ingress"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "panel-core",
- "serde",
- "serde_json",
- "tiny_http",
- "uuid",
-]
-
-[[package]]
-name = "appgea-panel-desktop"
-version = "0.1.0"
-dependencies = [
- "base64 0.22.1",
- "panel-core",
- "panel-ingress",
- "panel-store",
- "panel-terminal",
- "notify",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-notification",
- "toml 0.9.12+spec-1.1.0",
- "uuid",
-]
-
-[[package]]
-name = "panel-store"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "panel-core",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "panel-terminal"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "portable-pty",
- "serde",
- "uuid",
 ]
 
 [[package]]
@@ -2467,6 +2426,47 @@ checksum = "9aa2b01e1d916879f73a53d01d1d6cee68adbb31d6d9177a8cfce093cced1d50"
 dependencies = [
  "futures-core",
  "pin-project-lite",
+]
+
+[[package]]
+name = "panel-core"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "uuid",
+]
+
+[[package]]
+name = "panel-ingress"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "panel-core",
+ "serde",
+ "serde_json",
+ "tiny_http",
+ "uuid",
+]
+
+[[package]]
+name = "panel-store"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "panel-core",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "panel-terminal"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "portable-pty",
+ "serde",
+ "uuid",
 ]
 
 [[package]]

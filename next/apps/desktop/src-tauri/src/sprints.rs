@@ -115,7 +115,7 @@ fn sprints_dir() -> Result<PathBuf, String> {
 
 /// Local `YYYY-MM-DD`. No chrono in this tree; the `date` binary is on every Mac.
 pub fn today() -> String {
-    std::process::Command::new("date")
+    crate::platform::command("date")
         .arg("+%Y-%m-%d")
         .output()
         .ok()

@@ -24,7 +24,7 @@
 use serde::Serialize;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::{Mutex, OnceLock};
 use std::thread::sleep;
 use std::time::{Duration, Instant};
@@ -60,6 +60,10 @@ fn sdk_root() -> PathBuf {
             }
         }
     }
+    #[cfg(windows)]
+    if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+        return PathBuf::from(local).join("Android").join("Sdk");
+    }
     home().join("Library/Android/sdk")
 }
 
@@ -71,7 +75,7 @@ fn home() -> PathBuf {
 /// works off PATH. Never an error: a machine with no SDK simply has no Android devices, and that
 /// is an honest empty list rather than a failure to report.
 fn tool(dir: &str, name: &str) -> PathBuf {
-    let path = sdk_root().join(dir).join(name);
+    let path = sdk_root().join(dir).join(format!("{name}{}", std::env::consts::EXE_SUFFIX));
     if path.is_file() {
         path
     } else {
@@ -98,7 +102,7 @@ pub fn available() -> bool {
             return available;
         }
     }
-    let available = Command::new(adb())
+    let available = crate::platform::command(adb())
         .arg("--version")
         .output()
         .is_ok_and(|out| out.status.success());
@@ -109,7 +113,7 @@ pub fn available() -> bool {
 /// Run adb and hand back its stdout, or None when the call failed. Every adb call in this file
 /// goes through here so a missing SDK is one `None` rather than a panic per call site.
 fn adb_out(args: &[&str]) -> Option<String> {
-    let out = Command::new(adb()).args(args).output().ok()?;
+    let out = crate::platform::command(adb()).args(args).output().ok()?;
     if !out.status.success() {
         return None;
     }
@@ -173,7 +177,7 @@ fn avd_of(serial: &str) -> Option<String> {
 
 /// Every AVD defined on this machine, running or not.
 fn defined_avds() -> Vec<String> {
-    let Ok(out) = Command::new(emulator_bin()).arg("-list-avds").output() else {
+    let Ok(out) = crate::platform::command(emulator_bin()).arg("-list-avds").output() else {
         return Vec::new();
     };
     if !out.status.success() {
@@ -392,7 +396,7 @@ fn start_and_wait(avd: &str, cold: bool, appear: Duration) -> Result<String, Str
         .map(|(serial, ..)| serial)
         .collect();
     let binary = emulator_bin();
-    let mut command = Command::new(&binary);
+    let mut command = crate::platform::command(&binary);
     // Older emulator builds resolve their engine relative to the binary's own directory and
     // PANIC when started from anywhere else. Standing in that directory costs nothing and makes
     // the difference between a run and an unexplained exit.
@@ -484,7 +488,7 @@ pub fn shutdown_now(serial: &str) {
     if !serial.starts_with("emulator-") {
         return;
     }
-    let _ = Command::new(adb())
+    let _ = crate::platform::command(adb())
         .args(["-s", serial, "emu", "kill"])
         .status();
 }
@@ -495,7 +499,7 @@ pub fn shutdown_now(serial: &str) {
 /// still gets its run, just without the window jumping to the front.
 pub fn focus() {
     std::thread::spawn(|| {
-        let _ = Command::new("osascript")
+        let _ = crate::platform::command("osascript")
             .args([
                 "-e",
                 r#"tell application "System Events"

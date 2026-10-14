@@ -33,6 +33,9 @@ struct TerminalSession {
     /// The tail of everything this PTY has printed. Written by the reader thread, read by
     /// whoever is saving the wall — hence the lock the thread already holds a handle to.
     screen: Arc<Mutex<String>>,
+    /// Windows only: the job holding this PTY's whole process tree. Dropping it ends them all.
+    #[cfg(windows)]
+    job: Option<job::Job>,
 }
 
 /// Drop the front of a kept screen until it fits, then move the cut forward to the next newline.
@@ -143,8 +146,12 @@ impl TerminalManager {
         })?;
 
         let program = program.unwrap_or_else(default_shell);
-        let mut command = CommandBuilder::new(&program);
-        for arg in args {
+        #[cfg(windows)]
+        let (launch, prefix) = windows_launch(&program);
+        #[cfg(not(windows))]
+        let (launch, prefix) = (program.clone(), Vec::<String>::new());
+        let mut command = CommandBuilder::new(&launch);
+        for arg in prefix.into_iter().chain(args) {
             command.arg(arg);
         }
         command.cwd(&cwd);
@@ -158,6 +165,8 @@ impl TerminalManager {
             .spawn_command(command)
             .with_context(|| format!("start {program}"))?;
         drop(pair.slave);
+        #[cfg(windows)]
+        let job = child.process_id().and_then(job::Job::holding);
 
         let terminal_id = Uuid::new_v4().to_string();
         let reader_id = terminal_id.clone();
@@ -208,6 +217,8 @@ impl TerminalManager {
                 writer,
                 child,
                 screen,
+                #[cfg(windows)]
+                job,
             },
         );
         Ok(terminal_id)
@@ -313,6 +324,15 @@ impl ClosingTerminal {
         // Read before the kill: once the agent dies its children belong to launchd, and
         // nothing links a dev server an agent started back to the tab that started it.
         let tree = session.child.process_id().map(descendants).unwrap_or_default();
+        #[cfg(windows)]
+        {
+            // The job first: Git Bash's `exec` re-parents through a helper that exits, so
+            // the parent links taskkill walks are already cut below a dev server's shell.
+            drop(session.job.take());
+            if let Some(pid) = session.child.process_id() {
+                kill_tree(pid);
+            }
+        }
         let _ = session.child.kill();
         let _ = session.child.wait();
         end_all(&tree);
@@ -372,6 +392,11 @@ fn decode_stream(carry: &mut Vec<u8>, chunk: &[u8]) -> String {
 /// Every process below `root`, whatever its process group. An agent runs its commands in groups
 /// of their own with no terminal, so the SIGHUP a closing PTY sends never reaches them.
 fn descendants(root: u32) -> Vec<u32> {
+    // Windows has no `ps`; `kill_tree` ends the whole tree through the OS's own parent links.
+    if cfg!(windows) {
+        let _ = root;
+        return Vec::new();
+    }
     let Ok(out) = std::process::Command::new("ps").args(["-A", "-o", "pid=,ppid="]).output() else {
         return Vec::new();
     };
@@ -415,10 +440,135 @@ fn end_all(pids: &[u32]) {
     let _ = signal("-KILL", pids);
 }
 
+/// `taskkill /T` walks the parent links Windows keeps, so an agent's dev servers and builds go
+/// down with its tab exactly as the Unix process-group sweep takes them.
+#[cfg(windows)]
+fn kill_tree(pid: u32) {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let _ = std::process::Command::new("taskkill")
+        .args(["/T", "/F", "/PID", &pid.to_string()])
+        .creation_flags(CREATE_NO_WINDOW)
+        .output();
+}
+
+/// What to actually start for `program` on Windows. CreateProcess runs only real executables,
+/// but npm installs agents (codex, opencode) as `.cmd` shims. Rather than route them through
+/// cmd.exe, whose quoting mangles the long instruction arguments agents get, the shim is read
+/// for the target it wraps: a native exe, or a Node script run by node.
+#[cfg(windows)]
+fn windows_launch(program: &str) -> (String, Vec<String>) {
+    use std::path::{Path, PathBuf};
+    let unchanged = (program.to_string(), Vec::new());
+    if Path::new(program).extension().is_some_and(|ext| ext.eq_ignore_ascii_case("exe")) {
+        return unchanged;
+    }
+    let candidates: Vec<PathBuf> = if program.contains(['\\', '/']) {
+        vec![PathBuf::from(program)]
+    } else {
+        std::env::var_os("PATH")
+            .map(|path| std::env::split_paths(&path).map(|dir| dir.join(program)).collect())
+            .unwrap_or_default()
+    };
+    for base in candidates {
+        if base.with_extension("exe").is_file() || base.with_extension("com").is_file() {
+            return unchanged;
+        }
+        let shim = base.with_extension("cmd");
+        let Ok(text) = std::fs::read_to_string(&shim) else { continue };
+        let dir = shim.parent().unwrap_or(Path::new("."));
+        // Every quoted "%dp0%\…" path in the shim; the last one that is not node.exe is the target.
+        let target = text
+            .split('"')
+            .filter_map(|part| part.strip_prefix("%dp0%\\"))
+            .filter(|part| !part.eq_ignore_ascii_case("node.exe"))
+            .last()
+            .map(|relative| dir.join(relative));
+        let Some(target) = target else {
+            return ("cmd.exe".into(), vec!["/C".into(), shim.to_string_lossy().into_owned()]);
+        };
+        let target_text = target.to_string_lossy().into_owned();
+        let is_script = matches!(
+            target.extension().and_then(|ext| ext.to_str()),
+            Some("js" | "cjs" | "mjs")
+        );
+        if !is_script {
+            return (target_text, Vec::new());
+        }
+        let local_node = dir.join("node.exe");
+        let node = if local_node.is_file() {
+            local_node.to_string_lossy().into_owned()
+        } else {
+            "node".into()
+        };
+        return (node, vec![target_text]);
+    }
+    unchanged
+}
+
+/// A Windows job object with kill-on-close. Every process the PTY child starts joins it, however
+/// its parent links are later rewired, so closing the handle is the one dependable tree kill.
+#[cfg(windows)]
+mod job {
+    use std::ffi::c_void;
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn CreateJobObjectW(attributes: *mut c_void, name: *const u16) -> *mut c_void;
+        fn SetInformationJobObject(job: *mut c_void, class: i32, info: *const c_void, len: u32) -> i32;
+        fn OpenProcess(access: u32, inherit: i32, pid: u32) -> *mut c_void;
+        fn AssignProcessToJobObject(job: *mut c_void, process: *mut c_void) -> i32;
+        fn CloseHandle(handle: *mut c_void) -> i32;
+    }
+
+    const EXTENDED_LIMIT_INFORMATION: i32 = 9;
+    const KILL_ON_JOB_CLOSE: u64 = 0x2000;
+    const PROCESS_SET_QUOTA: u32 = 0x0100;
+    const PROCESS_TERMINATE: u32 = 0x0001;
+
+    pub struct Job(isize);
+
+    impl Job {
+        pub fn holding(pid: u32) -> Option<Job> {
+            unsafe {
+                let job = CreateJobObjectW(std::ptr::null_mut(), std::ptr::null());
+                if job.is_null() {
+                    return None;
+                }
+                let job = Job(job as isize);
+                // JOBOBJECT_EXTENDED_LIMIT_INFORMATION is 144 bytes on x64; LimitFlags sits at
+                // byte 16, the third u64's low half.
+                let mut info = [0u64; 18];
+                info[2] = KILL_ON_JOB_CLOSE;
+                let size = std::mem::size_of_val(&info) as u32;
+                if SetInformationJobObject(job.0 as _, EXTENDED_LIMIT_INFORMATION, info.as_ptr().cast(), size) == 0 {
+                    return None;
+                }
+                let process = OpenProcess(PROCESS_SET_QUOTA | PROCESS_TERMINATE, 0, pid);
+                if process.is_null() {
+                    return None;
+                }
+                let assigned = AssignProcessToJobObject(job.0 as _, process) != 0;
+                CloseHandle(process);
+                assigned.then_some(job)
+            }
+        }
+    }
+
+    impl Drop for Job {
+        fn drop(&mut self) {
+            unsafe {
+                CloseHandle(self.0 as _);
+            }
+        }
+    }
+}
+
 fn default_shell() -> String {
     #[cfg(windows)]
     {
-        std::env::var("COMSPEC").unwrap_or_else(|_| "powershell.exe".into())
+        // PowerShell, not COMSPEC: cmd.exe is nobody's working shell on a current Windows.
+        "powershell.exe".into()
     }
     #[cfg(not(windows))]
     {

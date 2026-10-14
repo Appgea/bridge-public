@@ -49,9 +49,22 @@ import {
   indentLabel,
   lineDiff,
   mountFindInProject,
+  mountJumpBar,
   mountQuickOpen,
+  scopeAt,
+  symbolBadge,
 } from "./editor";
-import type { DiffRow } from "./editor";
+import type {
+  DiffRow,
+  FileVisual,
+  JumpCrumb,
+  JumpMenuItem,
+  JumpMenuSpec,
+  OutlineItem,
+  OutlineKind,
+  ScrollSpot,
+  SymbolTable,
+} from "./editor";
 import type { QuickOpenList, QuickOpenTarget } from "./editor";
 import {
   announceBreakpoints,
@@ -123,6 +136,26 @@ type SymbolLocation = {
   detail: string;
 };
 
+/** A name the project declares, from Rust's facts cache. `kind` is an outline kind. */
+type ProjectSymbol = {
+  name: string;
+  path: string;
+  line: number;
+  kind: "class" | "struct" | "enum" | "protocol" | "type" | "function" | "constant";
+};
+
+/** The glyph markup for a file or folder, as the tree draws it. */
+const glyphMarkup = (visual: FileVisual): string =>
+  `<span class="ft-glyph ${visual.className}" aria-hidden="true">${visual.svg}</span>`;
+
+const BAR_ICONS = {
+  navigator: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="11" rx="2"/><path d="M6 2.5v11"/><path d="M3.3 5.2h1M3.3 7.2h1M3.3 9.2h1" stroke-linecap="round"/></svg>',
+  back: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 3.5 5.5 8l4.5 4.5"/></svg>',
+  forward: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 3.5 10.5 8 6 12.5"/></svg>',
+  related: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.3" aria-hidden="true"><rect x="2.5" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="9" y="2.5" width="4.5" height="4.5" rx="1"/><rect x="2.5" y="9" width="4.5" height="4.5" rx="1"/><rect x="9" y="9" width="4.5" height="4.5" rx="1"/></svg>',
+  search: '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="7" cy="7" r="4.3"/><path d="m10.2 10.2 3.3 3.3"/></svg>',
+};
+
 /** One file the open one reaches, or that reaches it. `why` is the import or type that links them. */
 type RailFile = {
   path: string;
@@ -168,7 +201,8 @@ type TextTab = {
   conflict: boolean;
   /** What the agent put on disk, parked while the conflict is open. */
   incoming: string | null;
-  scrollTop: number;
+  /** Where the buffer was scrolled when it left the screen. */
+  scroll: ScrollSpot | null;
   /** A kept slot. Opening another file beside it never replaces it. */
   pinned: boolean;
 };
@@ -274,7 +308,7 @@ export type FilesHooks = {
 };
 
 export function mountFiles(host: HTMLElement, hooks: FilesHooks = {}): FilesHandle {
-  host.classList.add("files-root");
+  host.classList.add("files-root", "ui-still");
   host.replaceChildren();
 
   /* ------------------------------------------------------------- chrome */
@@ -320,42 +354,45 @@ export function mountFiles(host: HTMLElement, hooks: FilesHooks = {}): FilesHand
   const editor = document.createElement("div");
   editor.className = "ed";
 
-  const toolbar = document.createElement("div");
-  toolbar.className = "ed-toolbar";
-  toolbar.setAttribute("role", "toolbar");
-  toolbar.setAttribute("aria-label", "Coding tools");
-  toolbar.innerHTML = `
-    <button class="ed-tool" type="button" data-work-action="navigator" aria-label="Toggle file explorer" title="Toggle file explorer" aria-expanded="true">${icon("panel-left")}</button>
-    <button class="ed-tool" type="button" data-work-action="open">Open file <kbd>⌘P</kbd></button>
-    <button class="ed-tool" type="button" data-work-action="search">Search <kbd>⌘⇧F</kbd></button>
-    <span class="ed-tool-spacer"></span>
-    <button class="ed-tool" type="button" data-work-action="wrap" aria-pressed="false">Wrap</button>
-    <button class="ed-tool ed-tool-save" type="button" data-work-action="save">Save <kbd>⌘S</kbd></button>`;
-  const saveButton = toolbar.querySelector<HTMLButtonElement>('[data-work-action="save"]')!;
-  const wrapButton = toolbar.querySelector<HTMLButtonElement>('[data-work-action="wrap"]')!;
-  const navigatorButton = toolbar.querySelector<HTMLButtonElement>('[data-work-action="navigator"]')!;
+  /*
+   * The jump bar, Xcode's. It replaces a toolbar of labelled buttons that repeated the welcome
+   * screen. Where you are is now the bar itself, `project › folder › file › Type › method`, and
+   * every crumb is a menu: a folder lists its contents, a symbol opens the file's outline (⌃6).
+   * Related files, back and forward sit at its head, where Xcode keeps them.
+   */
+  const jumpBar = mountJumpBar({ container: host, restoreFocus: () => view.focus() });
+  jumpBar.root.classList.add("ed-jump");
+  const barButton = (markup: string, title: string, action?: string): HTMLButtonElement => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "jb-btn";
+    button.innerHTML = markup;
+    button.title = title;
+    button.setAttribute("aria-label", title.replace(/ \(.*\)$/, ""));
+    if (action) button.dataset.workAction = action;
+    return button;
+  };
+  const navigatorButton = barButton(BAR_ICONS.navigator, "Hide file explorer", "navigator");
+  navigatorButton.setAttribute("aria-label", "Toggle file explorer");
+  navigatorButton.setAttribute("aria-expanded", "true");
 
   const tabStrip = document.createElement("div");
   tabStrip.className = "ed-tabs";
   tabStrip.setAttribute("role", "tablist");
 
-  /* ‹ › at the head of the strip. A jump — a Related chip, a ⌘-click, a Find hit — is a
-     promise that you can come back, and a promise needs a button. ⌃⌘← / ⌃⌘→, Xcode's keys. */
-  const trailNav = document.createElement("div");
-  trailNav.className = "ed-trail";
-  const backButton = document.createElement("button");
-  backButton.type = "button";
-  backButton.className = "ed-trail-btn";
-  backButton.textContent = "‹";
-  backButton.title = "Back (⌃⌘←)";
-  backButton.setAttribute("aria-label", "Back");
-  const forwardButton = document.createElement("button");
-  forwardButton.type = "button";
-  forwardButton.className = "ed-trail-btn";
-  forwardButton.textContent = "›";
-  forwardButton.title = "Forward (⌃⌘→)";
-  forwardButton.setAttribute("aria-label", "Forward");
-  trailNav.append(backButton, forwardButton);
+  /* ‹ › in the jump bar. A jump — a ⌘-click, a Find hit, a symbol from ⌃6 — is a promise that
+     you can come back, and a promise needs a button. ⌃⌘← / ⌃⌘→, Xcode's keys. */
+  const backButton = barButton(BAR_ICONS.back, "Back (⌃⌘←)");
+  const forwardButton = barButton(BAR_ICONS.forward, "Forward (⌃⌘→)");
+
+  /* RELATED — what the open file reaches and what reaches it, as Xcode's related-items menu
+     (⌃1). The count is in the tooltip and the menu. A number pinned to the icon read as a badge
+     to clear, and it came and went with every scan. */
+  const relatedButton = barButton(BAR_ICONS.related, "Related files (⌃1)");
+  const barDivider = document.createElement("span");
+  barDivider.className = "jb-divider";
+  jumpBar.lead.append(navigatorButton, barDivider, relatedButton, backButton, forwardButton);
+  jumpBar.trail.append(barButton(BAR_ICONS.search, "Find in project (⌘⇧F)", "search"));
 
   /*
    * The debug bar.
@@ -412,15 +449,6 @@ export function mountFiles(host: HTMLElement, hooks: FilesHooks = {}): FilesHand
     if (button) hooks.debugCommand?.(button.dataset.command as DebugCommand);
   });
 
-  /* RELATED — what the open file reaches and what reaches it. It used to be a whole row of
-     chips under the tabs, on every file, mostly saying "nothing". Now it is one count in the
-     status bar; the click opens the same ⌘⇧O picker, which is where the list reads best. */
-  const relatedButton = document.createElement("button");
-  relatedButton.type = "button";
-  relatedButton.className = "ed-stat ed-stat-act ed-status-related";
-  relatedButton.hidden = true;
-  relatedButton.title = "Related files (⌘⇧O)";
-
   const conflictBar = document.createElement("div");
   conflictBar.className = "ed-conflict";
   conflictBar.hidden = true;
@@ -455,20 +483,21 @@ export function mountFiles(host: HTMLElement, hooks: FilesHooks = {}): FilesHand
       <button type="button" data-work-action="new">${icon("work")}<span><b>Create a file</b><small>Start in the project root</small></span><span aria-hidden="true">＋</span></button>
     </div>
     <section class="ed-recent" hidden aria-label="Recently visited files"><h3>Pick up where you left off</h3><div class="ed-recent-files"></div></section>
-    <div class="ed-welcome-notes"><span><kbd>⌘</kbd> click a symbol to find its definition</span><span><kbd>⌘⇧O</kbd> explore related files</span></div>`;
+    <div class="ed-welcome-notes"><span><kbd>⌘⇧O</kbd> open any file or symbol</span><span><kbd>⌘</kbd> click a name to jump to it</span><span><kbd>⌃6</kbd> jump within the file</span></div>`;
   empty.append(emptyCard);
 
-  /* The status bar. An editor without one reads as a text box: you cannot say where you are,
-     what language is lit, or whether the buffer agrees with disk. Left is the full path,
-     because the tab only carries a basename. Right is position, then state. */
+  /* The status bar. An editor without one reads as a text box: you cannot say what language is
+     lit, or whether the buffer agrees with disk. The path lives in the jump bar, so this is
+     position on the left, state on the right. The two never share a row of flex items: the
+     caret column changes on every key, and nothing else may slide because of it. */
   const status = document.createElement("footer");
   status.className = "ed-status";
   status.hidden = true;
-  const statusPath = document.createElement("span");
-  statusPath.className = "ed-status-path";
+  const statusPos = document.createElement("span");
+  statusPos.className = "ed-status-pos";
   const statusMeta = document.createElement("span");
   statusMeta.className = "ed-status-meta";
-  status.append(statusPath, relatedButton, statusMeta);
+  status.append(statusPos, statusMeta);
 
   /* The conflict diff. It shares the drawer row with find-in-project — you are never doing both
      at once, and giving the comparison the full width of the pane is what makes it readable. */
@@ -481,7 +510,7 @@ export function mountFiles(host: HTMLElement, hooks: FilesHooks = {}): FilesHand
   toast.className = "ed-toast";
   toast.hidden = true;
 
-  editor.append(debugBar, tabStrip, toolbar, conflictBar, surface, mediaEl, empty, diffPanel, status, toast);
+  editor.append(debugBar, tabStrip, jumpBar.root, conflictBar, surface, mediaEl, empty, diffPanel, status, toast);
   host.append(nav, editor);
 
 
@@ -574,6 +603,13 @@ export function mountFiles(host: HTMLElement, hooks: FilesHooks = {}): FilesHand
       if (project) void refreshGit(project);
     },
     onHunkError: (error) => fail(`Could not stage hunk — ${error}`),
+    /* Xcode's colouring needs to know whose name a name is. Rust serves the project's own. */
+    symbols: () => symbolTable,
+    /* ⌘-hover underlines a name, ⌘-click and ⌃⌘J jump to where it is declared. */
+    goToDefinition: (symbol) => {
+      if (activePath) void openSymbol(symbol, activePath);
+    },
+    onOutline: () => renderSymbols(),
     /* Hovering a name while the program is paused answers "what is this right now". Silent at
        every other moment — a tooltip that fires on a resting file is noise on a reading surface. */
     hoverValue: (expression) =>
@@ -631,7 +667,10 @@ export function mountFiles(host: HTMLElement, hooks: FilesHooks = {}): FilesHand
         paintTabState(tab);
         queueChanges();
       }
-      if (update.docChanged || update.selectionSet) renderStatusMeta();
+      if (update.docChanged || update.selectionSet) {
+        renderStatusMeta();
+        scheduleSymbols();
+      }
     },
     /* Tabs park their states off-screen. Theme toggles and zoom reach them here, so switching
        back to a parked tab can never resurrect the old palette or the old size. */
@@ -809,12 +848,6 @@ export function mountFiles(host: HTMLElement, hooks: FilesHooks = {}): FilesHand
     }
   }
 
-  const toTarget = (file: RailFile): QuickOpenTarget => ({
-    path: file.path,
-    line: lineOf(file.ref),
-    detail: file.why,
-  });
-
   /* ------------------------------------------------------- the file index */
 
   function loadFileIndex(): Promise<string[]> {
@@ -838,50 +871,133 @@ export function mountFiles(host: HTMLElement, hooks: FilesHooks = {}): FilesHand
 
   const fileTargets = (paths: string[]): QuickOpenTarget[] => paths.map((path) => ({ path }));
 
-  /** The ⌘P list: the whole project, from cache in the same frame, or behind one fetch. */
-  const anyFileList = (): QuickOpenList => ({
-    title: "Open file",
-    targets: fileTargets(fileIndex ?? []),
-    pending: fileIndex ? undefined : loadFileIndex().then(fileTargets),
-  });
+  /* ------------------------------------------------------- project symbols */
 
-  /* ⌘P — any file in the project. The one Xcode key nobody has to learn. */
+  /*
+   * Every name the project declares, read by Rust from the same facts cache go-to-definition
+   * uses. Two readers: the editor colours project names the way Xcode does, and Open Quickly
+   * lists them beside the files. Fetched on project select, and again a beat after a save or an
+   * agent write, because either can add a name.
+   */
+  let symbolTable: SymbolTable | null = null;
+  let symbolTargets: QuickOpenTarget[] = [];
+  /** The project the table belongs to. A table from the last project must never colour this one. */
+  let symbolsFor: string | null = null;
+  let symbolsPromise: Promise<void> | null = null;
+  let symbolTimer = 0;
+
+  const TYPE_KINDS = new Set<OutlineKind>(["class", "struct", "enum", "protocol", "type"]);
+
+  function loadSymbols(force = false): Promise<void> {
+    const owner = project;
+    if (!owner) return Promise.resolve();
+    if (!force && symbolsFor === owner) return Promise.resolve();
+    if (!force && symbolsPromise) return symbolsPromise;
+    const request = invoke<ProjectSymbol[]>("project_symbols", { project: owner })
+      .then((found) => {
+        if (project !== owner) return;
+        const types = new Set<string>();
+        const others = new Set<string>();
+        symbolTargets = found.map((symbol) => {
+          const isType = TYPE_KINDS.has(symbol.kind);
+          (isType ? types : others).add(symbol.name);
+          return {
+            path: symbol.path,
+            line: symbol.line,
+            name: symbol.name,
+            where: symbol.path,
+            icon: symbolBadge(symbol.kind),
+            label: symbol.kind,
+            // A type wins a tie with a method of the same name, as in Xcode.
+            rank: isType ? 3 : 0,
+          };
+        });
+        symbolTable = { types, others };
+        symbolsFor = owner;
+        code.refreshSymbols();
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (symbolsPromise === request) symbolsPromise = null;
+      });
+    symbolsPromise = request;
+    return request;
+  }
+
+  /** A save or an agent write may add a name. Re-read once the burst is over. */
+  function queueSymbols(): void {
+    window.clearTimeout(symbolTimer);
+    symbolTimer = window.setTimeout(() => void loadSymbols(true), 1200);
+  }
+
+  /* ---------------------------------------------------------- open quickly */
+
+  /** Where you have been, newest first, minus the file on screen: Open Quickly before you type. */
+  function recentTargets(): QuickOpenTarget[] {
+    const seen = new Set<string>(activePath ? [activePath] : []);
+    const found: QuickOpenTarget[] = [];
+    for (const spot of [...current.trail].reverse()) {
+      if (seen.has(spot.path)) continue;
+      seen.add(spot.path);
+      found.push({ path: spot.path, detail: "recent" });
+      if (found.length === 12) break;
+    }
+    return found;
+  }
+
+  const quickTargets = (): QuickOpenTarget[] => [...fileTargets(fileIndex ?? []), ...symbolTargets];
+
+  /** Files and symbols, from cache in the same frame, or behind one fetch of each. */
+  const anyFileList = (): QuickOpenList => {
+    const ready = fileIndex !== null && symbolsFor === project;
+    return {
+      title: "Open Quickly",
+      targets: quickTargets(),
+      recent: recentTargets(),
+      pending: ready ? undefined : Promise.all([loadFileIndex(), loadSymbols()]).then(quickTargets),
+    };
+  };
+
+  /* ⌘⇧O, Xcode's Open Quickly, and ⌘P for hands that learned it elsewhere. Every file and every
+     name the project declares, ranked as you type. `login:42` lands on a line. */
   const openAny = mountQuickOpen({
     host,
-    shortcut: { key: "p", shift: false },
-    placeholder: "Type a file name",
-    emptyText: "No file matches.",
+    shortcut: [{ key: "o", shift: true }, { key: "p", shift: false }],
+    placeholder: "A file, a symbol, or name:line",
+    emptyText: "No file or symbol matches.",
     restoreFocus: () => view.focus(),
     onEmpty: () => fail("No files found in this project."),
     onChoose: (target) => void openFile(target.path, target.line),
     load: anyFileList,
   });
 
-  relatedButton.addEventListener("click", () => void quickOpen.open());
+  /* ------------------------------------------------------- related items */
 
-  /* ⌘⇧O — the files related to the open one: what it reaches and what reaches it. Working that
-     out means asking Rust to read the file, which is not free — so the panel opens on the cache
-     in the same frame and the scan, when it is needed, lands behind it. With nothing open there
-     is no relationship to show, so it falls back to the whole project. */
-  const quickOpen = mountQuickOpen({
-    host,
-    emptyText: "No matching related file.",
-    restoreFocus: () => view.focus(),
-    onEmpty: () => fail("No related files found for the current file."),
-    onChoose: (target) => void openFile(target.path, target.line),
-    load: () => {
-      if (!activePath) return anyFileList();
-      const path = activePath;
-      const fresh = relationshipPath === path && !relationshipsLoading;
-      return {
-        title: `Related to ${basename(path)}`,
-        targets: (fresh ? relationships : relationCache.get(path) ?? []).map(toTarget),
-        pending: fresh
-          ? undefined
-          : refreshRelationships(path).then((files) => files.map(toTarget)),
-      };
-    },
-  });
+  function relatedMenu(files: RailFile[]): JumpMenuSpec {
+    return {
+      items: files.map((file): JumpMenuItem => ({
+        label: basename(file.path),
+        detail: `${file.direction === "incoming" ? "uses this file" : file.direction === "both" ? "both ways" : "used here"} · ${file.why}`,
+        icon: glyphMarkup(fileVisual({ name: basename(file.path) })),
+        run: () => void openFile(file.path, lineOf(file.ref)),
+      })),
+      empty: "Nothing here imports this file, and it imports nothing here.",
+    };
+  }
+
+  /** ⌃1, or the grid button: what the open file reaches and what reaches it. */
+  function openRelated(): void {
+    if (!activePath) return;
+    if (jumpBar.isOpen() && relatedButton.classList.contains("is-open")) {
+      jumpBar.close();
+      return;
+    }
+    const path = activePath;
+    const fresh = relationshipPath === path && !relationshipsLoading;
+    const known = fresh ? relationships : relationCache.get(path);
+    jumpBar.openMenu(relatedButton, known ? relatedMenu(known) : refreshRelationships(path).then(relatedMenu));
+  }
+  relatedButton.addEventListener("click", openRelated);
 
   /* Find in project. It appends itself to `editor`, so it lands in the grid row reserved for it
      between the buffer and the status bar. Scoped to the selected project, read fresh on every
@@ -917,13 +1033,6 @@ export function mountFiles(host: HTMLElement, hooks: FilesHooks = {}): FilesHand
       case "search": closeDiff(); find.open(); break;
       case "new": void newEntry(null, false); break;
       case "navigator": setNavigatorVisible(nav.hidden === true); break;
-      case "wrap": code.setWrap(!code.wrapped()); renderStatusMeta(); break;
-      case "save": {
-        const tab = activePath ? tabs.get(activePath) : null;
-        if (tab?.kind === "text" && tab.conflict) openDiff(tab);
-        else void save();
-        break;
-      }
     }
   });
 
@@ -954,28 +1063,6 @@ export function mountFiles(host: HTMLElement, hooks: FilesHooks = {}): FilesHand
     recentSection.hidden = !visited.size;
   }
 
-  function renderTools(): void {
-    const tab = activePath ? tabs.get(activePath) : null;
-    const text = tab?.kind === "text" ? tab : null;
-    saveButton.disabled = !text || (!isDirty(text) && !text.conflict);
-    const label = text?.conflict ? "Review conflict" : `Save <kbd>⌘S</kbd>`;
-    if (saveButton.innerHTML !== label) saveButton.innerHTML = label;
-    saveButton.classList.toggle("has-changes", !!text && isDirty(text));
-    wrapButton.disabled = !text;
-    wrapButton.setAttribute("aria-pressed", String(!!text && code.wrapped()));
-  }
-
-  function symbolAt(position: number): string | null {
-    const line = view.state.doc.lineAt(position);
-    const offset = position - line.from;
-    let from = offset;
-    let to = offset;
-    while (from > 0 && /[\w$]/u.test(line.text[from - 1])) from -= 1;
-    while (to < line.text.length && /[\w$]/u.test(line.text[to])) to += 1;
-    const symbol = line.text.slice(from, to);
-    return /^[\p{L}_$][\p{L}\p{N}_$]*$/u.test(symbol) ? symbol : null;
-  }
-
   async function openSymbol(symbol: string, sourcePath: string): Promise<void> {
     if (!project) return;
     try {
@@ -989,7 +1076,7 @@ export function mountFiles(host: HTMLElement, hooks: FilesHooks = {}): FilesHand
       } else if (locations.length === 1) {
         await openFile(locations[0].path, locations[0].line);
       } else {
-        void quickOpen.openWith({
+        void openAny.openWith({
           title: `Definitions of ${symbol}`,
           targets: locations.map((location) => ({
             path: location.path,
@@ -1003,38 +1090,175 @@ export function mountFiles(host: HTMLElement, hooks: FilesHooks = {}): FilesHand
     }
   }
 
-  surface.addEventListener(
-    "mousedown",
-    (event) => {
-      if (!event.metaKey || event.button !== 0 || !activePath) return;
-      const tab = tabs.get(activePath);
-      if (!tab || tab.kind !== "text") return;
-      const position = view.posAtCoords({ x: event.clientX, y: event.clientY });
-      if (position === null) return;
-      const symbol = symbolAt(position);
-      if (!symbol) return;
-      event.preventDefault();
-      event.stopPropagation();
-      void openSymbol(symbol, tab.path);
-    },
-    true,
-  );
-
 
   /* -------------------------------------------------------------- related */
 
-  /** One count in the status bar. "Looking…" while the scan runs, hidden with nothing open. */
+  /** The related button's tooltip carries the count. */
   function renderRelated(): void {
-    relatedButton.hidden = activePath === null;
-    if (activePath === null) return;
     const count = relationships.length;
-    relatedButton.textContent = count
-      ? `${count} related`
-      : relationshipsLoading
-        ? "Looking…"
-        : "No related";
-    relatedButton.disabled = !count;
+    relatedButton.disabled = activePath === null;
+    relatedButton.title =
+      activePath === null
+        ? "Related files (⌃1)"
+        : relationshipsLoading
+          ? "Related files, looking… (⌃1)"
+          : `${count} related ${count === 1 ? "file" : "files"} (⌃1)`;
   }
+
+  /* ------------------------------------------------------------ jump bar */
+
+  /** One folder's contents as a jump menu. A folder drills in; a file opens. */
+  async function folderMenu(dir: string, here?: string): Promise<JumpMenuSpec> {
+    const owner = project;
+    if (!owner) return { items: [] };
+    const entries = await invoke<DirEntry[]>("read_dir", { project: owner, path: dir });
+    return {
+      items: entries.map((entry): JumpMenuItem => {
+        const path = dir ? `${dir}/${entry.name}` : entry.name;
+        return {
+          label: entry.name,
+          icon: glyphMarkup(fileVisual({ name: entry.name, isDir: entry.is_dir })),
+          current: entry.name === here,
+          drill: entry.is_dir ? () => folderMenu(path) : undefined,
+          run: entry.is_dir ? undefined : () => void openFile(path, undefined, true),
+        };
+      }),
+      empty: "This folder is empty.",
+    };
+  }
+
+  /** The path half: project, each folder, the file. Rebuilt on activate; the bar skips no-ops. */
+  function renderJump(): void {
+    const tab = activePath ? tabs.get(activePath) : null;
+    const crumbs: JumpCrumb[] = [];
+    if (project) {
+      const parts = tab ? tab.path.split("/") : [];
+      crumbs.push({
+        key: `project:${project}`,
+        label: basename(projectPath) || "Project",
+        icon: `<span class="jb-project" aria-hidden="true">${icon("folder")}</span>`,
+        title: projectPath,
+        menu: () => folderMenu("", parts[0]),
+      });
+      for (let index = 0; index < parts.length - 1; index += 1) {
+        const dir = parts.slice(0, index + 1).join("/");
+        crumbs.push({
+          key: `dir:${dir}`,
+          label: parts[index],
+          icon: glyphMarkup(fileVisual({ name: parts[index], isDir: true })),
+          title: dir,
+          menu: () => folderMenu(dir, parts[index + 1]),
+        });
+      }
+      if (tab) {
+        const dir = parts.slice(0, -1).join("/");
+        crumbs.push({
+          key: `file:${tab.path}`,
+          label: tab.name,
+          icon: glyphMarkup(fileVisual({ name: tab.name })),
+          title: tab.path,
+          menu: () => folderMenu(dir, tab.name),
+        });
+      }
+    }
+    jumpBar.setPath(crumbs);
+    renderSymbols();
+  }
+
+  /** ⌃6: the file's outline, with the item the caret is in ticked. */
+  function documentItems(here: OutlineItem | null): JumpMenuSpec {
+    return {
+      items: code.outline().map((item): JumpMenuItem => ({
+        label: item.name,
+        icon: item.kind === "mark" ? undefined : symbolBadge(item.kind),
+        depth: item.depth,
+        heading: item.kind === "mark",
+        rule: item.separator,
+        current: !!here && item.line === here.line && item.name === here.name,
+        run: () => goLine(item.line),
+      })),
+      empty: "No symbols in this file.",
+    };
+  }
+
+  /** The symbol half: the scopes around the caret, innermost last. "No Selection" outside any. */
+  function renderSymbols(): void {
+    const tab = activePath ? tabs.get(activePath) : null;
+    if (!tab || tab.kind !== "text") {
+      jumpBar.setSymbols([]);
+      return;
+    }
+    const chain = scopeAt(code.outline(), caretLine());
+    jumpBar.setSymbols(
+      chain.length
+        ? chain.map((item): JumpCrumb => ({
+            key: `${item.kind}:${item.line}`,
+            label: item.name,
+            icon: symbolBadge(item.kind),
+            title: `${item.name}, line ${item.line} (⌃6)`,
+            menu: () => documentItems(item),
+          }))
+        : [{ key: "none", label: "No Selection", dim: true, title: "Document items (⌃6)", menu: () => documentItems(null) }],
+    );
+  }
+
+  /** Caret moves arrive per keystroke. The crumbs follow once per frame. */
+  let symbolFrame = 0;
+  function scheduleSymbols(): void {
+    if (symbolFrame) return;
+    symbolFrame = requestAnimationFrame(() => {
+      symbolFrame = 0;
+      renderSymbols();
+    });
+  }
+
+  /** A jump inside the open file, recorded so ⌃⌘← comes back. */
+  function goLine(line: number): void {
+    if (activePath) recordJump(activePath, line);
+    code.jumpTo(line);
+  }
+
+  /** ⇧⌘J — show the open file in the navigator, opening it and its folders if needed. */
+  async function revealActive(): Promise<void> {
+    if (!activePath) return;
+    const path = activePath;
+    if (nav.hidden) setNavigatorVisible(true);
+    if (treeQuery) {
+      filterInput.value = "";
+      treeQuery = "";
+      renderTree();
+    }
+    await revealInTree(path);
+    const node = nodeAt(path);
+    if (!node || activePath !== path) return;
+    cursorNode = node;
+    paintCursor();
+    treeEl.focus();
+  }
+
+  window.addEventListener(
+    "keydown",
+    (event) => {
+      if (event.repeat || event.altKey || host.closest("[hidden]") || host.getClientRects().length === 0) return;
+      const ctrlOnly = event.ctrlKey && !event.metaKey && !event.shiftKey;
+      const tab = activePath ? tabs.get(activePath) : null;
+      if (ctrlOnly && event.code === "Digit6") {
+        if (!tab || tab.kind !== "text") return;
+        jumpBar.openLast();
+      } else if (ctrlOnly && event.code === "Digit1") {
+        if (!tab) return;
+        openRelated();
+      } else if (event.metaKey && event.shiftKey && !event.ctrlKey && event.code === "KeyJ") {
+        if (!tab) return;
+        void revealActive();
+      } else {
+        return;
+      }
+      event.preventDefault();
+      event.stopImmediatePropagation();
+    },
+    true,
+  );
 
   /* --------------------------------------------------------------- filter */
 
@@ -1409,7 +1633,6 @@ export function mountFiles(host: HTMLElement, hooks: FilesHooks = {}): FilesHand
       fileIndex = null;
       relationCache.clear();
       retargetTabs(node.path, to);
-      statusPathFor = null;
       renderTabs();
       await reloadFolder(dir.replace(/\/$/, ""));
       void refreshGit(owner);
@@ -1876,7 +2099,6 @@ export function mountFiles(host: HTMLElement, hooks: FilesHooks = {}): FilesHand
       el.append(glyph, label, close);
       frag.append(el);
     }
-    frag.prepend(trailNav);
     tabStrip.replaceChildren(frag);
     paintTrail();
     const activeTab = activePath ? tabs.get(activePath) : null;
@@ -1887,6 +2109,7 @@ export function mountFiles(host: HTMLElement, hooks: FilesHooks = {}): FilesHand
     mediaEl.hidden = !activeTab || activeTab.kind !== "media";
     if (diffFor && (activePath !== diffFor || !tabs.has(diffFor))) closeDiff();
     renderStatus();
+    renderJump();
     renderConflict();
     markTreeActive();
   }
@@ -1936,46 +2159,30 @@ export function mountFiles(host: HTMLElement, hooks: FilesHooks = {}): FilesHand
 
   /* ----------------------------------------------------------- status bar */
 
-  /** Which file the crumbs currently spell, so typing does not rebuild them every keystroke. */
-  let statusPathFor: string | null = null;
-
   function renderStatus(): void {
-    renderTools();
     const tab = activePath ? tabs.get(activePath) : null;
     status.hidden = !tab;
     if (!tab) {
-      statusPathFor = null;
-      statusPath.replaceChildren();
+      statusPos.replaceChildren();
       statusMeta.replaceChildren();
       return;
-    }
-    if (statusPathFor !== tab.path) {
-      statusPathFor = tab.path;
-      // Two parts, not per-folder crumbs: the folders shrink and ellipsize, the filename never
-      // does. A deep path must never be able to push the name it names off the bar.
-      const dir = document.createElement("span");
-      dir.className = "ed-crumb-dir";
-      dir.textContent = dirname(tab.path);
-      const leaf = document.createElement("span");
-      leaf.className = "ed-crumb-leaf";
-      leaf.textContent = tab.name;
-      statusPath.replaceChildren(dir, leaf);
-      statusPath.title = tab.path;
     }
     renderStatusMeta();
   }
 
-  /** The right end: where the caret is, then whether the buffer agrees with disk. */
+  /** Where the caret is, then whether the buffer agrees with disk. On the right, anything that
+   *  comes and goes sits leftmost, and the state word has a fixed slot, so a keystroke that
+   *  flips Saved to Unsaved moves nothing else. */
   function renderStatusMeta(): void {
-    renderTools();
     const tab = activePath ? tabs.get(activePath) : null;
     if (!tab || status.hidden) return;
+    const pos = document.createDocumentFragment();
     const frag = document.createDocumentFragment();
-    const add = (text: string, className = ""): void => {
+    const add = (text: string, className = "", into: DocumentFragment = frag): void => {
       const el = document.createElement("span");
       el.className = className ? `ed-stat ${className}` : "ed-stat";
       el.textContent = text;
-      frag.append(el);
+      into.append(el);
     };
 
     /* A stat you can act on is a button. It looks like the others until you hover, so the bar
@@ -1994,16 +2201,18 @@ export function mountFiles(host: HTMLElement, hooks: FilesHooks = {}): FilesHand
       const state = tab.path === activePath ? view.state : tab.state;
       const range = state.selection.main;
       const line = state.doc.lineAt(range.head);
-      add(`Ln ${line.number}, Col ${range.head - line.from + 1}`, "is-num");
-      if (!range.empty) add(`${range.to - range.from} sel`, "is-num");
+      add(`Ln ${line.number}, Col ${range.head - line.from + 1}`, "is-num is-pos", pos);
+      const carets = state.selection.ranges.length;
+      if (carets > 1) add(`${carets} cursors`, "is-num", pos);
+      else if (!range.empty) add(`${range.to - range.from} selected`, "is-num", pos);
       const armed = breakpoints.get(tab.path)?.size ?? 0;
-      if (armed) add(`${armed} bp`, "is-risk");
+      if (armed) add(`${armed} ${armed === 1 ? "breakpoint" : "breakpoints"}`, "");
       let unsaved = 0;
       for (const other of tabs.values()) if (other.kind === "text" && isDirty(other)) unsaved += 1;
-      if (tab.conflict) add("Conflict", "is-risk");
-      else if (isDirty(tab)) act("Unsaved", "Save (⌘S)", "is-warn", () => void save());
-      else add("Saved", "is-ok");
       if (unsaved > 1) act(`${unsaved} unsaved`, "Save all (⌥⌘S)", "is-warn", () => void saveAll());
+      if (tab.conflict) add("Conflict", "is-risk is-state");
+      else if (isDirty(tab)) act("Unsaved", "Save (⌘S)", "is-warn is-state", () => void save());
+      else add("Saved", "is-ok is-state");
       add(indentLabel(state), "");
       const wrapped = tab.path === activePath ? code.wrapped() : false;
       act(wrapped ? "Wrap" : "No wrap", "Toggle line wrapping for this file", wrapped ? "is-on" : "", () => {
@@ -2012,6 +2221,7 @@ export function mountFiles(host: HTMLElement, hooks: FilesHooks = {}): FilesHand
       });
     }
     add(fileVisual({ name: tab.name }).label, "is-lang");
+    statusPos.replaceChildren(pos);
     statusMeta.replaceChildren(frag);
   }
 
@@ -2228,6 +2438,25 @@ export function mountFiles(host: HTMLElement, hooks: FilesHooks = {}): FilesHand
     paintTrail();
   }
 
+  /**
+   * A jump inside the file on screen — ⌃6, a definition in the same file, Open Quickly to a
+   * symbol here. Xcode records these too: ⌃⌘← after jumping to a method returns to the line you
+   * left, not to the last file. Nudges of a line or two are not jumps.
+   */
+  function recordJump(path: string, line: number): void {
+    if (retracing) return;
+    const here = current.trail[current.trailAt];
+    if (!here || !sameFile(here.path, path)) return; // a new file is recorded by `arriveSpot`
+    const from = caretLine();
+    if (Math.abs(from - line) < 2) return;
+    here.line = from;
+    current.trail.splice(current.trailAt + 1);
+    current.trail.push({ path, line });
+    if (current.trail.length > 60) current.trail.shift();
+    current.trailAt = current.trail.length - 1;
+    paintTrail();
+  }
+
   async function retrace(delta: -1 | 1): Promise<void> {
     const next = current.trailAt + delta;
     const spot = current.trail[next];
@@ -2278,19 +2507,18 @@ export function mountFiles(host: HTMLElement, hooks: FilesHooks = {}): FilesHand
     if (!tab) return;
     const current = activePath ? tabs.get(activePath) : null;
     if (current && current.kind === "text" && current.path !== path) {
-      current.scrollTop = view.scrollDOM.scrollTop;
+      current.scroll = code.scrollSpot();
     }
     leaveSpot();
 
     activePath = path;
     if (tab.kind === "text") {
-      code.show(tab.state); // re-measures — the pane may have just been revealed
+      code.show(tab.state, tab.scroll); // re-measures — the pane may have just been revealed
       code.setBreakpoints([...(breakpoints.get(tab.path) ?? [])]);
       paintChanges();
       void loadHead(tab);
       // The stopped line belongs to ONE file. Switching tabs must not carry the band along.
       syncExecLine();
-      view.scrollDOM.scrollTop = tab.scrollTop;
       mediaEl.replaceChildren();
       const cached = relationCache.get(path);
       relationshipPath = path;
@@ -2368,6 +2596,7 @@ export function mountFiles(host: HTMLElement, hooks: FilesHooks = {}): FilesHand
     tab.pinned = true; // a file you saved into is one you are working in — keep its slot
     if (project !== owner) return contents;
     relationCache.clear();
+    queueSymbols();
     if (project) void refreshGit(project);
     void loadHead(tab, true); // a save can be the commit's own file; re-ask rather than assume
     renderTabs();
@@ -2460,10 +2689,14 @@ export function mountFiles(host: HTMLElement, hooks: FilesHooks = {}): FilesHand
   async function openFile(path: string, line?: number, keep = line !== undefined): Promise<void> {
     const open = findTab(path);
     if (open) {
+      const onScreen = open.path === activePath;
       if (keep) open.pinned = true;
-      if (open.path !== activePath) activate(open.path);
+      if (!onScreen) activate(open.path);
       else renderTabs();
-      if (open.kind === "text" && line !== undefined) jumpTo(line);
+      if (open.kind === "text" && line !== undefined) {
+        if (onScreen) recordJump(open.path, line);
+        jumpTo(line);
+      }
       return;
     }
     if (!project) {
@@ -2519,7 +2752,7 @@ export function mountFiles(host: HTMLElement, hooks: FilesHooks = {}): FilesHand
       head: null,
       conflict: false,
       incoming: null,
-      scrollTop: 0,
+      scroll: null,
       pinned: keep,
     };
     seat(tab);
@@ -2569,7 +2802,7 @@ export function mountFiles(host: HTMLElement, hooks: FilesHooks = {}): FilesHand
       // Park what is open before touching anything. The active buffer's scroll lives in the
       // view, not in the tab, so it has to be copied back or the file reopens at the top.
       const leaving = activePath ? tabs.get(activePath) : null;
-      if (leaving && leaving.kind === "text") leaving.scrollTop = view.scrollDOM.scrollTop;
+      if (leaving && leaving.kind === "text") leaving.scroll = code.scrollSpot();
       leaveSpot();
       current.activePath = activePath;
 
@@ -2592,8 +2825,8 @@ export function mountFiles(host: HTMLElement, hooks: FilesHooks = {}): FilesHand
       debugPhase = null;
       execAt = null;
       renderDebugBar();
-      quickOpen.close();
       openAny.close();
+      jumpBar.close();
       closeMenu();
       find.reset();
       closeDiff();
@@ -2602,6 +2835,13 @@ export function mountFiles(host: HTMLElement, hooks: FilesHooks = {}): FilesHand
 
       fileIndex = null;
       fileIndexPromise = null;
+      // The last project's names must not colour this one's code, even for the moment it takes
+      // to read the new table.
+      window.clearTimeout(symbolTimer);
+      symbolTable = null;
+      symbolTargets = [];
+      symbolsFor = null;
+      symbolsPromise = null;
       treeQuery = "";
       filterInput.value = "";
       renderRelated();
@@ -2613,9 +2853,9 @@ export function mountFiles(host: HTMLElement, hooks: FilesHooks = {}): FilesHand
       gitFolders = new Set();
       void loadTreeRoot(projectId);
       void refreshGit(projectId);
-      // Parse the project now, so the first Related row answers at once instead of after a
-      // cold scan. Repeats are cheap: only changed files are read again.
-      void invoke("warm_code_nav", { project: projectId }).catch(() => undefined);
+      // Parse the project now, so the first Related menu answers at once instead of after a cold
+      // scan, and names are coloured as theirs. Repeats are cheap: only changed files are read.
+      void loadSymbols(true);
       void invoke<Record<string, number[]>>("debug_breakpoints", { project: projectId })
         .then((stored) => {
           if (project !== projectId) return;
@@ -2665,6 +2905,7 @@ export function mountFiles(host: HTMLElement, hooks: FilesHooks = {}): FilesHand
 
     markDirty(path: string): void {
       relationCache.clear();
+      queueSymbols();
       fileIndex = null; // the agent may have created or removed a file
       if (project) void refreshGit(project);
       // The agent may have created this file. The tree learns now, not on the next switch.

@@ -1,30 +1,38 @@
-/** Nested scope headers pinned above the first visible source line. */
+/**
+ * Nested scope headers pinned above the first visible source line.
+ *
+ * A pinned header has to be indistinguishable from the line it repeats: same column, same
+ * indentation, same line height, same colours, the number in the gutter where numbers live.
+ * The first version sat inside the content edge with its own 32px number column, a fixed 22px
+ * row and its indentation trimmed, so every header was shifted against the code under it —
+ * the eye read it as a different file. Now the row spans the editor, the number is placed on
+ * the line-number gutter's own right edge, and the text keeps its leading whitespace.
+ */
 
 import type { Extension } from "@codemirror/state";
 import { syntaxTree } from "@codemirror/language";
 import { EditorView, ViewPlugin, type ViewUpdate } from "@codemirror/view";
 import { highlightTree } from "@lezer/highlight";
-import type { SyntaxNode } from "@lezer/common";
 import { currentMode, highlightStyles } from "./theme";
+import { refreshSymbols, roleClass, roleHighlighter, roleOf, symbolSource } from "./semantic";
+import { outlineSource } from "./minimap";
+import { scopeAt, type OutlineItem } from "./outline";
 
-type Header = { line: number; text: string };
+type Header = { line: number; text: string; end: number };
 
 /**
- * The header line, with the same token classes the buffer paints it in. A pinned header in
- * plain grey read as a different file; this walks the live syntax tree over just that line and
- * emits the same scoped class names the theme already has rules for.
+ * The header line, painted by the same two highlighters the buffer uses — the token theme and
+ * the identifier roles — so a pinned name is the colour it is below.
  */
 function highlightedLine(view: EditorView, line: number): HTMLElement {
   const code = document.createElement("code");
-  const doc = view.state.doc;
-  const range = doc.line(line);
-  const text = range.text;
-  const lead = text.search(/\S|$/);
-  const from = range.from + lead;
-  let at = from;
+  const { state } = view;
+  const range = state.doc.line(line);
+  const table = state.facet(symbolSource)();
+  let at = range.from;
   const push = (to: number, classes: string | null): void => {
     if (to <= at) return;
-    const chunk = doc.sliceString(at, to);
+    const chunk = state.doc.sliceString(at, to);
     if (classes) {
       const span = document.createElement("span");
       span.className = classes;
@@ -36,88 +44,70 @@ function highlightedLine(view: EditorView, line: number): HTMLElement {
     at = to;
   };
   highlightTree(
-    syntaxTree(view.state),
-    highlightStyles[currentMode()],
+    syntaxTree(state),
+    [highlightStyles[currentMode()], roleHighlighter],
     (start, end, classes) => {
-      push(Math.max(start, from), null);
-      push(Math.min(end, range.to), classes);
+      push(Math.max(start, range.from), null);
+      const role = roleOf(classes);
+      const style = classes.split(" ").filter((part) => !part.startsWith("xr-"));
+      if (role) {
+        const after = /\S/.exec(state.doc.sliceString(end, Math.min(range.to, end + 24)))?.[0] ?? "";
+        const semantic = roleClass(role, state.doc.sliceString(start, end), after, table);
+        if (semantic) style.push(semantic);
+      }
+      push(Math.min(end, range.to), style.join(" ") || null);
     },
-    from,
+    range.from,
     range.to,
   );
   push(range.to, null);
   return code;
 }
 
-const ROOT_NODES = /^(Document|Program|Script|SourceFile|JsonText|MarkdownDocument)$/;
-const ONLY_PUNCTUATION = /^[\s{}()[\],;:]+$/;
+/** More than this and the pins start to hide the code they introduce. */
+const MAX_HEADERS = 3;
 
-function useful(text: string): boolean {
-  const clean = text.trim();
-  return Boolean(clean) && clean.length <= 180 && !ONLY_PUNCTUATION.test(clean);
-}
-
-function syntaxHeaders(view: EditorView, firstLine: number): Header[] {
-  const doc = view.state.doc;
-  const visible = doc.line(firstLine);
-  const position = Math.min(visible.to, visible.from + (visible.text.search(/\S|$/) || 0));
-  const found = new Map<number, Header>();
-  let node: SyntaxNode | null = syntaxTree(view.state).resolveInner(position, 1);
-  while (node) {
-    if (!ROOT_NODES.test(node.name) && node.from < visible.from && node.to > visible.from) {
-      let line = doc.lineAt(node.from);
-      // Some grammars start a block node on a brace-only line. The declaration just above it
-      // is the header readers need.
-      if (!useful(line.text)) {
-        for (let back = 1; back <= 2 && line.number > 1; back += 1) {
-          const candidate = doc.line(line.number - 1);
-          line = candidate;
-          if (useful(candidate.text)) break;
-        }
-      }
-      if (line.number < firstLine && useful(line.text)) {
-        found.set(line.number, { line: line.number, text: line.text.trim() });
-      }
-    }
-    node = node.parent;
-  }
-  return [...found.values()].sort((a, b) => a.line - b.line).slice(-3);
-}
-
-function indentation(text: string): number {
-  let columns = 0;
-  for (const character of text) {
-    if (character === " ") columns += 1;
-    else if (character === "\t") columns += 4;
-    else break;
-  }
-  return columns;
-}
-
-/** Stream parsers have a shallow tree. Indentation gives those languages an honest fallback. */
-function indentationHeaders(view: EditorView, firstLine: number): Header[] {
-  const doc = view.state.doc;
-  let target = indentation(doc.line(firstLine).text);
-  const found: Header[] = [];
-  for (let number = firstLine - 1; number >= Math.max(1, firstLine - 600); number -= 1) {
-    const text = doc.line(number).text;
-    const clean = text.trim();
-    if (!clean || indentation(text) >= target) continue;
-    if (!/[{:][\s,]*(?:\/\/.*)?$/.test(clean)) continue;
-    found.unshift({ line: number, text: clean });
-    target = indentation(text);
-    if (found.length === 3 || target === 0) break;
-  }
-  return found;
-}
-
+/**
+ * The scope pinned at each row.
+ *
+ * Row i repeats the i-th scope around the line that sits at that row's top, as long as the
+ * scope's own declaration has already scrolled past it. Asking per row, and not once for the line
+ * under all the pins, is what keeps a closing scope from flickering in and out: the pin stays
+ * while any of its body is level with it. Scopes come from the outline, the same rule the jump
+ * bar and the minimap use, so the three can never disagree about where you are.
+ */
 function headers(view: EditorView): Header[] {
-  if (!view.state.doc.length) return [];
-  const top = Math.max(0, view.scrollDOM.scrollTop - view.documentPadding.top + 1);
-  const firstLine = view.state.doc.lineAt(view.lineBlockAtHeight(top).from).number;
-  if (firstLine <= 1) return [];
-  const syntax = syntaxHeaders(view, firstLine);
-  return syntax.length ? syntax : indentationHeaders(view, firstLine);
+  const { state } = view;
+  if (!state.doc.length) return [];
+  const items = state.facet(outlineSource)?.items(state) ?? [];
+  if (!items.length) return [];
+  const row = view.defaultLineHeight;
+  const top = Math.max(0, view.scrollDOM.scrollTop - view.documentPadding.top);
+  const chain: OutlineItem[] = [];
+  for (let index = 0; index < MAX_HEADERS; index += 1) {
+    const line = state.doc.lineAt(view.lineBlockAtHeight(top + index * row + 1).from).number;
+    const around = scopeAt(items, line).filter((item) => item.line < line && item.line <= state.doc.lines);
+    // A different outer scope at this depth means the one above ended in between. Stop there.
+    if (around.length <= index || chain.some((item, at) => around[at] !== item)) break;
+    chain.push(around[index]);
+  }
+  return chain.map((item) => ({ line: item.line, text: state.doc.line(item.line).text, end: Math.min(item.end, state.doc.lines) }));
+}
+
+/**
+ * How far each row rides up as its scope runs out. A pin never covers code from outside its own
+ * scope: as the closing line comes up under it, the row is pushed up by the closing line, the
+ * way the next section's title pushes the last one off in a native list.
+ */
+function pushes(view: EditorView, rows: readonly Header[]): number[] {
+  const row = view.defaultLineHeight;
+  const top = view.scrollDOM.scrollTop - view.documentPadding.top;
+  let shift = 0;
+  return rows.map((header, index) => {
+    const bottom = view.lineBlockAt(view.state.doc.line(header.end).from).bottom - top;
+    shift = Math.min(shift, bottom - (index + 1) * row);
+    return Math.round(shift);
+  });
 }
 
 export function stickyScroll(): Extension {
@@ -126,9 +116,9 @@ export function stickyScroll(): Extension {
       private readonly root = document.createElement("div");
       private frame = 0;
       private signature = "";
-      /** Where the content edge sits inside the editor. Measured on geometry changes, never on scroll. */
-      private left = 0;
-      private top = 0;
+      /** Measured on geometry changes, never on scroll. */
+      private numberRight = 0;
+      private codeLeft = 0;
       private readonly onScroll = (): void => this.schedule();
       private readonly onTheme = (): void => {
         this.signature = "";
@@ -146,8 +136,14 @@ export function stickyScroll(): Extension {
       }
 
       update(update: ViewUpdate): void {
-        if (update.geometryChanged) this.measure();
-        if (update.docChanged || update.viewportChanged || update.geometryChanged) this.schedule();
+        if (update.geometryChanged) {
+          this.measure();
+          this.signature = "";
+        }
+        const recoloured = update.transactions.some((tr) => tr.effects.some((effect) => effect.is(refreshSymbols)));
+        if (update.docChanged || recoloured) this.signature = "";
+        // Any transaction may carry a fresh outline. Repainting is a string compare when nothing moved.
+        if (update.transactions.length || update.viewportChanged || update.geometryChanged) this.schedule();
       }
 
       destroy(): void {
@@ -157,14 +153,18 @@ export function stickyScroll(): Extension {
         this.root.remove();
       }
 
-      /** Two rect reads. They used to run on every scroll frame, forcing layout mid-scroll. */
+      /** Where the gutter's numbers end and where line text begins, relative to the editor. */
       private measure(): void {
-        const editorBox = this.view.dom.getBoundingClientRect();
-        const contentBox = this.view.contentDOM.getBoundingClientRect();
-        this.left = Math.max(0, contentBox.left - editorBox.left);
-        this.top = this.view.scrollDOM.offsetTop;
-        this.root.style.top = `${this.top}px`;
-        this.root.style.left = `${this.left}px`;
+        const { view } = this;
+        const editorBox = view.dom.getBoundingClientRect();
+        const numbers = view.dom.querySelector<HTMLElement>(".cm-lineNumbers");
+        const firstLine = view.contentDOM.querySelector<HTMLElement>(".cm-line");
+        const contentBox = view.contentDOM.getBoundingClientRect();
+        const pad = firstLine ? parseFloat(getComputedStyle(firstLine).paddingLeft) || 0 : 0;
+        this.numberRight = numbers ? numbers.getBoundingClientRect().right - editorBox.left : 0;
+        this.codeLeft = Math.max(0, contentBox.left - editorBox.left + pad + view.scrollDOM.scrollLeft);
+        this.root.style.top = `${view.scrollDOM.offsetTop}px`;
+        this.root.style.setProperty("--sticky-row", `${view.defaultLineHeight}px`);
       }
 
       private schedule(): void {
@@ -177,25 +177,50 @@ export function stickyScroll(): Extension {
 
       private paint(): void {
         const next = headers(this.view);
+        // Horizontal scroll moves the code, never the gutter — the pinned text follows.
+        this.root.style.setProperty("--sticky-shift", `${-this.view.scrollDOM.scrollLeft}px`);
         const signature = next.map((header) => `${header.line}:${header.text}`).join("\n");
-        if (signature === this.signature) {
-          this.root.hidden = !next.length;
-          return;
+        if (signature !== this.signature) {
+          this.signature = signature;
+          this.build(next);
         }
-        this.signature = signature;
+        this.root.hidden = !next.length;
+        this.place(next);
+      }
+
+      /** Rows ride up as their scopes close. Only transforms and one height change per frame. */
+      private place(next: readonly Header[]): void {
+        if (!next.length) return;
+        const shifts = pushes(this.view, next);
+        const rows = this.root.children;
+        for (let index = 0; index < rows.length; index += 1) {
+          const shift = shifts[index] ?? 0;
+          (rows[index] as HTMLElement).style.transform = shift ? `translateY(${shift}px)` : "";
+        }
+        const height = next.length * this.view.defaultLineHeight + (shifts[shifts.length - 1] ?? 0);
+        this.root.style.height = `${Math.max(0, height)}px`;
+      }
+
+      private build(next: readonly Header[]): void {
         const fragment = document.createDocumentFragment();
-        for (const header of next) {
+        for (const [index, header] of next.entries()) {
           const row = document.createElement("button");
           row.type = "button";
           row.className = "cm-sticky-row";
+          // An inner row riding up slides under the one above it, never over it.
+          row.style.zIndex = String(MAX_HEADERS - index);
           row.title = `Go to line ${header.line}`;
           const number = document.createElement("span");
+          number.className = "cm-sticky-num";
+          number.style.width = `${Math.max(0, this.numberRight - 6)}px`;
           number.textContent = String(header.line);
-          row.append(number, highlightedLine(this.view, header.line));
+          const code = highlightedLine(this.view, header.line);
+          code.style.left = `${this.codeLeft}px`;
+          row.append(number, code);
           row.addEventListener("click", () => {
             const line = this.view.state.doc.line(header.line);
             this.view.dispatch({
-              selection: { anchor: line.from },
+              selection: { anchor: line.from + (line.text.search(/\S|$/) || 0) },
               effects: EditorView.scrollIntoView(line.from, { y: "start" }),
             });
             this.view.focus();
@@ -203,7 +228,6 @@ export function stickyScroll(): Extension {
           fragment.append(row);
         }
         this.root.replaceChildren(fragment);
-        this.root.hidden = !next.length;
       }
     },
   );

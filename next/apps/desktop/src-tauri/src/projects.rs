@@ -11,7 +11,6 @@ use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -1438,7 +1437,7 @@ fn git_command(path: &Path, args: &[&str]) -> Result<String, String> {
     // Local reads must not wait forever on Git or a filesystem helper. Drain both pipes
     // concurrently so a large status result cannot block the child before it exits.
     let deadline = Instant::now() + Duration::from_secs(20);
-    let mut child = Command::new("git")
+    let mut child = crate::platform::command("git")
         .current_dir(path)
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GIT_OPTIONAL_LOCKS", "0")
@@ -1619,7 +1618,7 @@ fn classify(status: &str) -> String {
 /// the conflict view so the two can never disagree.
 pub fn git_head_file(root: &Path, relative: &str) -> Option<String> {
     // `--` guards a path that looks like a revision. A file named `HEAD` is rare and real.
-    let out = Command::new("git")
+    let out = crate::platform::command("git")
         .current_dir(root)
         .args(["show", &format!("HEAD:{relative}"), "--"])
         .output()
@@ -1645,7 +1644,7 @@ fn describe(status: &str) -> String {
 }
 
 pub(crate) fn git(path: &Path, args: &[&str]) -> Option<String> {
-    let out = Command::new("git")
+    let out = crate::platform::command("git")
         .current_dir(path)
         .args(args)
         .output()
@@ -1905,7 +1904,7 @@ mod tests {
         fs::write(root.join("note.md"), "human-readable\n").unwrap();
         fs::write(root.join("image.bin"), [0, 159, 146, 150]).unwrap();
         fs::write(root.join("generated/cache.txt"), "derived\n").unwrap();
-        let initialized = Command::new("git").arg("init").arg(&root).output().unwrap();
+        let initialized = crate::platform::command("git").arg("init").arg(&root).output().unwrap();
         assert!(initialized.status.success());
 
         let files = git_working_set(&root);

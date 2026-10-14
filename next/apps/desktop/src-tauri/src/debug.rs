@@ -12,7 +12,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::fs;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::path::{Path, PathBuf};
-use std::process::{Child, ChildStdin, Command, Stdio};
+use std::process::{Child, ChildStdin, Stdio};
 use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::time::Duration;
@@ -315,7 +315,7 @@ impl DebugManager {
         };
 
         let breakpoints = absolute_breakpoints(project, root);
-        let mut command = Command::new(
+        let mut command = crate::platform::command(
             profile
                 .argv
                 .first()
@@ -634,7 +634,7 @@ fn expand_string(value: &str, root: &Path) -> String {
 /// Xcode ships the adapter; nothing to install. Absent only on a machine with no Xcode, and
 /// there is no iOS app to debug there either.
 fn lldb_dap() -> Option<String> {
-    let output = Command::new("xcrun").args(["-f", "lldb-dap"]).output().ok()?;
+    let output = crate::platform::command("xcrun").args(["-f", "lldb-dap"]).output().ok()?;
     if !output.status.success() {
         return None;
     }
@@ -698,8 +698,8 @@ fn launch_native_ios(
 ) -> Result<String, String> {
     let (dir, xcodegen) = sim::native_spec(root).ok_or("this is not a native Xcode project")?;
     let script = sim::native_debug_script(udid, xcodegen);
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
-    let output = Command::new(shell)
+    let shell = sim::posix_shell();
+    let output = crate::platform::command(shell)
         .args(["-lc", &script])
         .current_dir(&dir)
         .output()

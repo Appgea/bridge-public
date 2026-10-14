@@ -72,7 +72,6 @@
 .nav-picker-row:hover,
 .nav-picker-row.is-selected {
   background: color-mix(in oklab, var(--accent) 15%, transparent);
-  transform: none;
 }
 .nav-picker-row > span:nth-child(2) {
   display: flex;

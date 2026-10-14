@@ -90,7 +90,7 @@ export type ProjectRunView = {
   /** "idle" until a run exists, then the sim lifecycle state verbatim. */
   state: string;
   device: string;
-  /** "flutter" | "native" | "android" | "godot" — only flutter has hot reload. */
+  /** "flutter" | "native" | "android" | "godot" | "electron" — only flutter has hot reload. */
   kind: string;
   /** Only virtual devices have a window to raise. */
   canFocus: boolean;
@@ -313,7 +313,7 @@ export function mountRunner(host: HTMLElement, events: RunnerEvents): RunnerHand
   let queueCount: HTMLElement;
   let searchQuery = "";
   let searchInput: HTMLInputElement | null = null;
-  let platformFilter: "all" | "flutter" | "native" | "android" | "godot" | "server" = "all";
+  let platformFilter: "all" | "flutter" | "native" | "android" | "godot" | "electron" | "server" = "all";
   /** The tile the keyboard is standing on, by project id. Always a visible tile, so ↵ has an
    *  answer the moment the screen is up — no click needed to start driving. */
   let cursor: string | null = null;
@@ -485,6 +485,7 @@ export function mountRunner(host: HTMLElement, events: RunnerEvents): RunnerHand
     native: "Native iOS",
     android: "Native Android",
     godot: "Godot · desktop",
+    electron: "Electron · desktop",
     server: "Dev server",
     flutter: "Flutter",
   };
@@ -523,6 +524,7 @@ export function mountRunner(host: HTMLElement, events: RunnerEvents): RunnerHand
     android: "Android",
     chrome: "Chrome",
     macos: "Mac",
+    windows: "Windows",
     desktop: "Desktop",
   };
 
@@ -620,7 +622,7 @@ export function mountRunner(host: HTMLElement, events: RunnerEvents): RunnerHand
       return `${target.name} · ${target.heldBy} is ${verb} on it`;
     }
     if (target.owns) return `${target.name} · its device`;
-    if (target.family === "chrome" || target.family === "macos" || target.family === "desktop") {
+    if (target.family === "chrome" || target.family === "macos" || target.family === "windows" || target.family === "desktop") {
       return target.name;
     }
     // Android reads the opposite way round from iOS, and the same word would lie in both.
@@ -1743,6 +1745,7 @@ export function mountRunner(host: HTMLElement, events: RunnerEvents): RunnerHand
         ["native", "Native iOS"],
         ["android", "Native Android"],
         ["godot", "Godot"],
+        ["electron", "Electron"],
         ["server", "Servers"],
       ] as const).forEach(([value, label]) => {
         const button = document.createElement("button");

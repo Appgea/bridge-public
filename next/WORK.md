@@ -92,6 +92,40 @@ Nothing on this list is load-bearing yet. In rough order of how often the absenc
 - The tree re-reads a folder the moment the agent writes into it.
 - Typing no longer rebuilds the tab strip and re-queries the tree on every keystroke.
 
+### The Xcode editor pass
+The buffer, its chrome and its keys now follow Xcode, because that is the editor its human reaches
+for. One shared core still drives every Panel editor.
+
+- **Look.** SF Mono 12 at Xcode's line spacing, on whole pixels. Xcode Default Dark and Light,
+  with Xcode's name rule: project names one hue, SDK names another, declarations a third. The
+  table of project names comes from Rust (`project_symbols`), off the same facts cache as
+  go-to-definition. The Work pane's chrome wears Xcode's greys, so buffer and chrome are one thing.
+- **Jump bar** replaces the toolbar. `project › folder › file › Type › method`; every crumb is a
+  menu that filters as you type, and ← → walk the crumbs. ⌃6 opens the file's outline with MARK
+  sections and kind badges. ⌃1 and the grid button open related files. ⇧⌘J reveals the file in
+  the navigator.
+- **Open Quickly** on ⌘⇧O and ⌘P: files and every declared name, ranked by camel humps and word
+  starts. `name:42` lands on a line. Empty, it lists where you have been.
+- **Gutter.** Breakpoints are blue tags on the line numbers. Fold chevrons show on hover. Change
+  bars sit between the numbers and the code. The paused line is Xcode's green.
+- **Navigation.** ⌘-hover underlines a name that can jump; ⌘-click and ⌃⌘J jump. Jumps inside a
+  file are history too, so ⌃⌘← returns to the line you left.
+- **Find bar** at the top, incremental, with "3 of 12" and a red miss. ⌥⌘F adds replace. ⌘E
+  uses the selection.
+- **Keys.** ⌥⌘[ ⌥⌘] move lines, ⌥⌘← ⌥⌘→ fold, ⌃I re-indents, ⌘\ toggles a breakpoint, ⌘L goes
+  to a line, ⌃⇧↑↓ add a caret. A double-click on a bracket selects its block.
+- **One scope rule.** `editor/outline.ts` reads types, functions and marks for the jump bar, ⌃6,
+  the minimap labels and the sticky headers. They cannot disagree about where you are.
+- **Speed.** The minimap paints only the visible window from a per-line cache. The Work buffer's
+  scroller is layout-contained, which took 15% off a keystroke on a 3000-line file.
+- **Nothing moves unless you move it.** Work controls opt out of the app's hover lift and press
+  squash (`.ui-still`). The active tab is never bold, so tabs keep their width. The status bar
+  puts the caret on the left and gives Saved/Unsaved one fixed slot. The find bar scrolls by its
+  own height, so text stays put when it opens. A returning tab lands on the same line: Safari 26
+  scrolls toward the caret after a state swap, and `show()` puts the spot back before paint.
+  Sticky headers ride up as their scope closes.
+- `ui/dev_editor.html` mounts the real Work pane on a fake project, for headless screenshots.
+
 ## The test for anything added here
 
 Does it help a human and an agent share one working tree? Line numbers, folding and a minimap are

@@ -1,6 +1,5 @@
 /**
- * Quick open — ⌘⇧O, Xcode's move. A host may pick another chord (the Work tab puts the
- * project-wide file list on ⌘P).
+ * Quick open — ⌘⇧O, Xcode's Open Quickly. A host may add chords (the Work tab answers ⌘P too).
  *
  * A pane hands over a list of places worth jumping to and what to do when one is chosen; this
  * owns the overlay, the fuzzy filter, the keyboard, and the shortcut itself. The Work tab
@@ -27,6 +26,10 @@ export type QuickOpenTarget = {
   icon?: string;
   /** The right-hand tag, when the target is not a file. Replaces the file-type label. */
   label?: string;
+  /** The grey line under the name, when the folder is not the answer (a symbol shows its file). */
+  where?: string;
+  /** Wins ties. Xcode lists a type before a method of the same name. */
+  rank?: number;
 };
 
 export type QuickOpenList = {
@@ -40,6 +43,8 @@ export type QuickOpenList = {
    * round-trip to see a panel.
    */
   pending?: Promise<QuickOpenTarget[]>;
+  /** Shown while the filter is empty, instead of `targets`. Where you were, newest first. */
+  recent?: QuickOpenTarget[];
 };
 
 export type QuickOpenOptions = {
@@ -61,8 +66,10 @@ export type QuickOpenOptions = {
   /** The chord that opens it. ⌘⇧O unless the host says otherwise. Always ⌘, never ⌃ or ⌥.
    *  `late` listens in the bubble phase: every pane on screen gets first refusal, and this one
    *  answers only when none of them swallowed the chord — the portfolio picker's place. */
-  shortcut?: { key: string; shift: boolean; late?: boolean };
+  shortcut?: Shortcut | Shortcut[];
 };
+
+type Shortcut = { key: string; shift: boolean; late?: boolean };
 
 /** Rows painted per render. A project list is thousands long; nobody scrolls past this —
  *  they type another letter. */
@@ -79,39 +86,125 @@ export type QuickOpen = {
 
 const basename = (path: string): string => path.split("/").pop() || path;
 
-/**
- * How well a row answers the query. Zero is "not at all". The order is what a hand would do:
- * the file whose NAME starts with what you typed, then a name containing it, then a folder
- * containing it, then letters-in-order — `prodsp` still finds `product_spine`. Ties go to the
- * shorter path, because `main.ts` is more often meant than `vendor/x/y/main.ts`.
- */
-function score(target: QuickOpenTarget, needle: string): number {
-  if (!needle) return 1;
-  const name = (target.name ?? basename(target.path)).toLocaleLowerCase();
-  const path = target.path.toLocaleLowerCase();
-  if (name.startsWith(needle)) return 400 - Math.min(99, name.length);
-  if (name.includes(needle)) return 300 - Math.min(99, name.length);
-  if (path.includes(needle)) return 200 - Math.min(99, path.length);
-  if (target.detail?.toLocaleLowerCase().includes(needle)) return 150;
-  let cursor = 0;
-  for (const character of path) {
-    if (character === needle[cursor]) cursor += 1;
-    if (cursor === needle.length) return 100 - Math.min(99, path.length);
-  }
-  return 0;
+type Match = { score: number; hits: number[] };
+
+/** Where a word starts: the first letter, after `_ - . / space`, or an upper case after a lower. */
+function boundary(text: string, index: number): boolean {
+  if (index === 0) return true;
+  const before = text[index - 1];
+  const here = text[index];
+  if ("_-./ :".includes(before)) return true;
+  return here !== here.toLocaleLowerCase() && before === before.toLocaleLowerCase() && /[a-z0-9]/i.test(before);
 }
 
-/** The name with the typed part marked, so the eye lands on WHY this row is here. */
-function nameNode(name: string, needle: string): HTMLElement {
+/** Letters in order, preferring word starts and runs — `fic` finds FindInProjectCard on its humps. */
+function subsequence(text: string, lower: string, needle: string, preferStarts: boolean): number[] | null {
+  const hits: number[] = [];
+  let from = 0;
+  for (const character of needle) {
+    let found = -1;
+    if (preferStarts) {
+      const previous = hits[hits.length - 1];
+      if (previous !== undefined && lower[previous + 1] === character) found = previous + 1;
+      for (let index = from; found < 0 && index < lower.length; index += 1) {
+        if (lower[index] === character && boundary(text, index)) found = index;
+      }
+    }
+    if (found < 0) found = lower.indexOf(character, from);
+    if (found < 0) return null;
+    hits.push(found);
+    from = found + 1;
+  }
+  return hits;
+}
+
+function rate(text: string, hits: number[]): number {
+  let score = 0;
+  hits.forEach((index, at) => {
+    score += 1;
+    if (boundary(text, index)) score += 8;
+    if (at > 0 && hits[at - 1] === index - 1) score += 5;
+  });
+  return score - Math.min(30, hits[0] ?? 0) - Math.min(20, text.length / 8);
+}
+
+/**
+ * How well `text` answers the query, with the letters that matched. The order is what a hand
+ * would do: the whole name, then a name that starts with it, then one that has it as a word,
+ * then anywhere, then its capitals and word starts (`fip` for find_in_project), then any letters
+ * in order. Shorter wins ties, because `main.ts` is meant more often than `vendor/x/main.ts`.
+ */
+function fuzzy(text: string, needle: string): Match | null {
+  const lower = text.toLocaleLowerCase();
+  const short = Math.min(99, text.length);
+  if (lower === needle) return { score: 1000, hits: [...needle].map((_, at) => at) };
+  const at = lower.indexOf(needle);
+  const run = (start: number): number[] => [...needle].map((_, offset) => start + offset);
+  if (at === 0) return { score: 900 - short, hits: run(0) };
+  if (at > 0) {
+    let word = at;
+    while (word >= 0 && !boundary(text, word)) word = lower.indexOf(needle, word + 1);
+    if (word > 0) return { score: 750 - short, hits: run(word) };
+    return { score: 600 - short - Math.min(50, at), hits: run(at) };
+  }
+  const humps = subsequence(text, lower, needle, true);
+  const plain = subsequence(text, lower, needle, false);
+  if (!humps && !plain) return null;
+  const first = humps ? rate(text, humps) : -Infinity;
+  const second = plain ? rate(text, plain) : -Infinity;
+  const hits = first >= second ? humps! : plain!;
+  return { score: 300 + Math.max(first, second), hits };
+}
+
+/** A row's best answer: its name, or for a file its path, a little behind. */
+function score(target: QuickOpenTarget, needle: string): Match | null {
+  const name = target.name ?? basename(target.path);
+  const byName = fuzzy(name, needle);
+  if (byName) return byName;
+  if (!target.name || needle.includes("/")) {
+    const byPath = fuzzy(target.path, needle);
+    if (byPath) return { score: byPath.score - 250, hits: [] };
+  }
+  if (target.detail?.toLocaleLowerCase().includes(needle)) return { score: 20, hits: [] };
+  return null;
+}
+
+/** `login.swift:42` — find the file, land on the line. Xcode's Open Quickly reads the same. */
+function parseQuery(raw: string): { needle: string; line?: number } {
+  const query = raw.trim().toLocaleLowerCase();
+  const spot = /^(.+?):(\d+)$/.exec(query);
+  return spot ? { needle: spot[1], line: Number(spot[2]) } : { needle: query };
+}
+
+/** The name with the matched letters marked, so the eye lands on WHY this row is here. */
+function nameNode(name: string, hits: readonly number[]): HTMLElement {
   const node = document.createElement("b");
-  const at = needle ? name.toLocaleLowerCase().indexOf(needle) : -1;
-  if (at < 0) {
+  if (!hits.length) {
     node.textContent = name;
     return node;
   }
-  const mark = document.createElement("mark");
-  mark.textContent = name.slice(at, at + needle.length);
-  node.append(name.slice(0, at), mark, name.slice(at + needle.length));
+  const hit = new Set(hits);
+  let run = "";
+  let marking = false;
+  const flush = (): void => {
+    if (!run) return;
+    if (marking) {
+      const mark = document.createElement("mark");
+      mark.textContent = run;
+      node.append(mark);
+    } else {
+      node.append(run);
+    }
+    run = "";
+  };
+  for (let index = 0; index < name.length; index += 1) {
+    if (hit.has(index) !== marking) {
+      flush();
+      marking = !marking;
+    }
+    run += name[index];
+  }
+  flush();
   return node;
 }
 
@@ -146,7 +239,11 @@ export function mountQuickOpen(options: QuickOpenOptions): QuickOpen {
   options.host.append(root);
 
   let targets: QuickOpenTarget[] = [];
+  let recent: QuickOpenTarget[] = [];
   let visible: QuickOpenTarget[] = [];
+  let marks = new Map<QuickOpenTarget, number[]>();
+  /** The `:42` typed after a name, applied to whichever row is chosen. */
+  let typedLine: number | undefined;
   let index = 0;
   /** Bumped on every open and close, so a slow fetch can tell it has been outlived. */
   let generation = 0;
@@ -157,25 +254,36 @@ export function mountQuickOpen(options: QuickOpenOptions): QuickOpen {
     awaiting = false;
     root.hidden = true;
     targets = [];
+    recent = [];
     visible = [];
+    marks = new Map();
     input.value = "";
     options.restoreFocus?.();
   }
 
   function choose(target: QuickOpenTarget): void {
+    const line = typedLine;
     close();
-    options.onChoose(target);
+    options.onChoose(line ? { ...target, line } : target);
   }
 
   function render(): void {
-    const query = input.value.trim().toLocaleLowerCase();
-    visible = query
-      ? targets
-          .map((target, at) => ({ target, at, score: score(target, query) }))
-          .filter((row) => row.score > 0)
-          .sort((a, b) => b.score - a.score || a.at - b.at)
-          .map((row) => row.target)
-      : targets;
+    const { needle: query, line: wanted } = parseQuery(input.value);
+    typedLine = wanted;
+    marks = new Map();
+    if (query) {
+      const rows: { target: QuickOpenTarget; at: number; score: number }[] = [];
+      targets.forEach((target, at) => {
+        const match = score(target, query);
+        if (!match) return;
+        rows.push({ target, at, score: match.score + (target.rank ?? 0) });
+        marks.set(target, match.hits);
+      });
+      rows.sort((a, b) => b.score - a.score || a.at - b.at);
+      visible = rows.map((row) => row.target);
+    } else {
+      visible = recent.length ? recent : targets;
+    }
     index = Math.max(0, Math.min(index, visible.length - 1, MAX_ROWS - 1));
     const frag = document.createDocumentFragment();
     visible.slice(0, MAX_ROWS).forEach((target, position) => {
@@ -191,12 +299,12 @@ export function mountQuickOpen(options: QuickOpenOptions): QuickOpen {
       icon.className = target.icon ? "qo-icon" : `ft-glyph ${identity.className}`;
       icon.innerHTML = target.icon ?? identity.svg;
       const body = document.createElement("span");
-      const name = nameNode(target.name ?? basename(target.path), query);
+      const name = nameNode(target.name ?? basename(target.path), marks.get(target) ?? []);
       const detail = document.createElement("small");
-      detail.textContent = `${dirname(target.path)}${target.detail ? ` · ${target.detail}` : ""}`;
+      detail.textContent = `${target.where ?? dirname(target.path)}${target.detail ? ` · ${target.detail}` : ""}`;
       body.append(name, detail);
       const line = document.createElement("i");
-      line.textContent = target.line ? `:${target.line}` : (target.label ?? identity.label);
+      line.textContent = typedLine ? `:${typedLine}` : target.line ? `:${target.line}` : (target.label ?? identity.label);
       row.append(icon, body, line);
       row.addEventListener("mouseenter", () => {
         if (index !== position) {
@@ -226,6 +334,7 @@ export function mountQuickOpen(options: QuickOpenOptions): QuickOpen {
     }
     const mine = ++generation;
     targets = next.targets;
+    recent = next.recent ?? [];
     awaiting = !!next.pending;
     index = 0;
     title.textContent = next.title;
@@ -286,12 +395,12 @@ export function mountQuickOpen(options: QuickOpenOptions): QuickOpen {
     if (event.target === root) close();
   });
 
-  const shortcut = options.shortcut ?? { key: "o", shift: true };
+  const chords = [options.shortcut ?? { key: "o", shift: true }].flat();
+  const late = chords.some((chord) => chord.late);
   const onShortcut = (event: KeyboardEvent): void => {
     if (
-      event.key.toLowerCase() !== shortcut.key ||
+      !chords.some((chord) => event.key.toLowerCase() === chord.key && event.shiftKey === chord.shift) ||
       !event.metaKey ||
-      event.shiftKey !== shortcut.shift ||
       event.ctrlKey ||
       event.altKey ||
       event.repeat ||
@@ -302,14 +411,14 @@ export function mountQuickOpen(options: QuickOpenOptions): QuickOpen {
     event.stopImmediatePropagation();
     void open();
   };
-  window.addEventListener("keydown", onShortcut, !shortcut.late);
+  window.addEventListener("keydown", onShortcut, !late);
 
   return {
     open,
     openWith,
     close,
     destroy() {
-      window.removeEventListener("keydown", onShortcut, !shortcut.late);
+      window.removeEventListener("keydown", onShortcut, !late);
       root.remove();
     },
   };

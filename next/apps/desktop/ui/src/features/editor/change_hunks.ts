@@ -7,6 +7,7 @@ import {
   gutter,
 } from "@codemirror/view";
 import { analyzeChanges, revertedHunk, type DiffAnalysis, type DiffHunk } from "./diff";
+import { overviewSources, type OverviewMark, type OverviewTone } from "./minimap";
 
 export type StageHunk = {
   path: string;
@@ -22,7 +23,7 @@ export type ChangeHunkActions = {
 const setChangeBase = StateEffect.define<string | null>();
 
 class ChangeMarker extends GutterMarker {
-  constructor(private readonly kind: string) {
+  constructor(readonly kind: OverviewTone) {
     super();
   }
 
@@ -236,6 +237,15 @@ export function changeGutter(path: string, actions: ChangeHunkActions): Extensio
   });
   return [
     field,
+    // The same marks, for the minimap's whole-file strip: a change scrolled off screen is still
+    // a change, and the strip is where a long file says so.
+    overviewSources.of((state) => {
+      const found: OverviewMark[] = [];
+      state.field(field).marks.between(0, state.doc.length, (from, _to, marker) => {
+        found.push({ line: state.doc.lineAt(from).number, tone: (marker as ChangeMarker).kind });
+      });
+      return found;
+    }),
     EditorView.updateListener.of((update) => {
       if (update.docChanged) closeChangePopover(update.view);
     }),

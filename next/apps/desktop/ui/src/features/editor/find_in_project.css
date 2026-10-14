@@ -61,8 +61,7 @@
   cursor: pointer;
   transition: color var(--fast) var(--ease), border-color var(--fast) var(--ease);
 }
-.fip-toggle:hover { color: var(--ink-dim); transform: none; }
-.fip-toggle:active { transform: none; }
+.fip-toggle:hover { color: var(--ink-dim); }
 .fip-toggle.is-on {
   border-color: color-mix(in oklab, var(--accent) 45%, transparent);
   background: color-mix(in oklab, var(--accent) 14%, transparent);
@@ -97,8 +96,7 @@
   cursor: pointer;
   transition: color var(--fast) var(--ease);
 }
-.fip-close:hover { color: var(--ink); transform: none; }
-.fip-close:active { transform: none; }
+.fip-close:hover { color: var(--ink); }
 
 /* ------------------------------------------------------------------- list */
 
@@ -171,8 +169,7 @@
   text-align: left;
   cursor: pointer;
 }
-.fip-hit:hover { background: color-mix(in oklab, var(--ink) 6%, transparent); transform: none; }
-.fip-hit:active { transform: none; }
+.fip-hit:hover { background: color-mix(in oklab, var(--ink) 6%, transparent); }
 .fip-hit.is-selected {
   background: color-mix(in oklab, var(--accent) 15%, transparent);
   color: var(--ink);

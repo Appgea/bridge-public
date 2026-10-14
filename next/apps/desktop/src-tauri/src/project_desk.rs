@@ -4,7 +4,6 @@ use serde::Serialize;
 use std::{
     fs,
     path::{Path, PathBuf},
-    process::Command,
     sync::Mutex,
 };
 
@@ -81,7 +80,7 @@ fn desk_path(p: &Project) -> PathBuf {
         .join("desk.md")
 }
 fn git(root: &Path, args: &[&str]) -> Result<String, String> {
-    let out = Command::new("git")
+    let out = crate::platform::command("git")
         .arg("--no-optional-locks")
         .arg("-C")
         .arg(root)

@@ -1,0 +1,251 @@
+/* Xcode's jump bar and its menus. Colours come from the host's tokens, so the bar wears the
+   pane it sits in. Nothing animates: a menu you summon with a key should be there on the key. */
+
+.jb {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  height: 28px;
+  padding: 0 6px 0 4px;
+  border-bottom: 1px solid var(--line-soft);
+  background: var(--bg);
+  font-size: 12px;
+  line-height: 1;
+  color: var(--ink-dim);
+  user-select: none;
+}
+
+.jb-lead,
+.jb-trail {
+  display: flex;
+  align-items: center;
+  flex: none;
+  gap: 1px;
+}
+.jb-lead { padding-right: 4px; }
+.jb-trail { margin-left: auto; padding-left: 6px; }
+
+/* A tool in the bar: icon-sized, quiet until hovered. */
+.jb-btn {
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ink-dim);
+  font: inherit;
+  cursor: default;
+}
+.jb-btn svg,
+.jb-btn .ui-icon { width: 14px; height: 14px; }
+.jb-btn:hover:not(:disabled),
+.jb-btn.is-open {
+  background: color-mix(in oklab, var(--ink) 9%, transparent);
+  color: var(--ink);
+}
+.jb-btn:disabled { color: var(--ink-faint); opacity: 0.4; }
+.jb-btn[aria-pressed="true"] { color: var(--accent); }
+.jb-btn kbd { font: 11px/1 var(--font-mono); color: var(--ink-faint); }
+.jb-btn.has-text { gap: 6px; grid-auto-flow: column; padding: 0 7px; }
+.jb-divider {
+  flex: none;
+  width: 1px;
+  height: 14px;
+  margin: 0 4px;
+  background: var(--line-soft);
+}
+
+/* The crumbs. Folders give way first, then symbols. The file name never does. */
+.jb-crumbs {
+  display: flex;
+  align-items: center;
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+.jb-path,
+.jb-symbols {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.jb-path { flex: 0 1 auto; }
+.jb-symbols { flex: 0 10 auto; }
+
+.jb-sep {
+  flex: none;
+  width: 6px;
+  height: 10px;
+  margin: 0 3px;
+  fill: none;
+  stroke: var(--ink-faint);
+  stroke-width: 1.3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+.jb-crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 1 auto;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 4px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ink-dim);
+  font: inherit;
+  cursor: default;
+}
+.jb-path .jb-crumb:last-child { flex-shrink: 0; color: var(--ink); }
+.jb-crumb:hover,
+.jb-crumb.is-open {
+  background: color-mix(in oklab, var(--ink) 9%, transparent);
+  color: var(--ink);
+}
+.jb-crumb.is-dim { color: var(--ink-faint); }
+.jb-crumb-label {
+  min-width: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.jb-glyph {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+.jb-glyph svg { width: 13px; height: 13px; }
+.jb-glyph .ft-glyph { width: 14px; height: 14px; }
+
+/* Xcode's symbol badge: a letter on a tinted square. */
+.jb-badge {
+  display: inline-grid;
+  place-items: center;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  color: #fff;
+  font: 700 9px/1 var(--font-ui, -apple-system, BlinkMacSystemFont, sans-serif);
+  letter-spacing: -0.04em;
+}
+.jb-badge.is-type { background: #a06ad8; }
+.jb-badge.is-ext { background: #df8a3e; }
+.jb-badge.is-func { background: #3d84dc; }
+.jb-badge.is-prop { background: #3f9f8a; }
+.jb-badge.is-todo { background: #d4a32c; }
+.jb-badge.is-mark { background: color-mix(in oklab, var(--ink) 35%, transparent); }
+
+/* ------------------------------------------------------------------- menu */
+
+.jb-menu {
+  position: fixed;
+  z-index: 60;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-width: 220px;
+  max-width: min(560px, 90vw);
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  background: var(--bg-raised);
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.32), 0 0 0 0.5px rgba(0, 0, 0, 0.2);
+  font-size: 12px;
+  color: var(--ink);
+  overflow: hidden;
+}
+
+.jb-menu-filter {
+  margin: 6px 6px 4px;
+  height: 22px;
+  padding: 0 7px;
+  border: 1px solid var(--line-soft);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  outline: none;
+}
+.jb-menu-filter:focus { border-color: color-mix(in oklab, var(--accent) 60%, var(--line)); }
+
+.jb-menu-list {
+  overflow-y: auto;
+  padding: 0 4px 5px;
+  scrollbar-width: thin;
+}
+.jb-menu-list hr {
+  height: 1px;
+  margin: 4px 6px;
+  border: 0;
+  background: var(--line-soft);
+}
+
+.jb-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 8px 0 4px;
+  border-radius: 4px;
+  white-space: nowrap;
+  cursor: default;
+}
+.jb-row.is-selected {
+  background: var(--accent);
+  color: #fff;
+}
+.jb-row.is-selected small,
+.jb-row.is-selected .jb-tick { color: color-mix(in oklab, #fff 80%, transparent); }
+/* A file glyph is drawn in its own hue, which can be the selection's blue. On the selected row
+   it goes white like the label, so the icon never disappears into the highlight. */
+.jb-row.is-selected .ft-glyph { color: #fff; }
+.jb-row.is-heading .jb-label { font-weight: 700; }
+.jb-row.is-drill::after {
+  content: "›";
+  margin-left: auto;
+  padding-left: 12px;
+  color: var(--ink-faint);
+}
+.jb-row.is-selected.is-drill::after { color: #fff; }
+
+.jb-tick {
+  flex: none;
+  width: 10px;
+  color: var(--ink-dim);
+  font-size: 10px;
+  text-align: center;
+}
+.jb-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.jb-label mark {
+  background: transparent;
+  color: inherit;
+  font-weight: 700;
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+.jb-row small {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--ink-faint);
+  font-size: 11px;
+}
+.jb-empty {
+  margin: 4px 10px 6px;
+  color: var(--ink-faint);
+}

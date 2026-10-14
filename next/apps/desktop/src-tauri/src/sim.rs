@@ -20,7 +20,6 @@ use serde::Serialize;
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::{Mutex, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -36,7 +35,7 @@ pub struct SimDevice {
 
 /// A resolved run: what to spawn, and where.
 pub struct SimRun {
-    /// "flutter", "native", "android" or "godot" — the UI labels from this.
+    /// "flutter", "native", "android", "godot" or "electron" — the UI labels from this.
     pub kind: &'static str,
     pub cwd: PathBuf,
     pub program: String,
@@ -86,7 +85,7 @@ pub fn shutdown_device_now(udid: &str) {
     if udid.is_empty() {
         return;
     }
-    let _ = Command::new("xcrun")
+    let _ = crate::platform::command("xcrun")
         .args(["simctl", "shutdown", udid])
         .status();
 }
@@ -95,7 +94,7 @@ pub fn shutdown_device_now(udid: &str) {
 
 /// Available iOS simulators, newest runtime first, booted ones flagged.
 pub fn list_devices() -> Vec<SimDevice> {
-    let out = match Command::new("xcrun")
+    let out = match crate::platform::command("xcrun")
         .args(["simctl", "list", "devices", "available", "--json"])
         .output()
     {
@@ -397,7 +396,7 @@ pub fn clone_device() -> Result<SimDevice, String> {
         .map(|duration| duration.as_secs() % 100_000)
         .unwrap_or(0);
     let name = format!("Panel {} {stamp}", source.name);
-    let out = Command::new("xcrun")
+    let out = crate::platform::command("xcrun")
         .args(["simctl", "clone", &source.udid, &name])
         .output()
         .map_err(|error| error.to_string())?;
@@ -424,7 +423,7 @@ pub fn uninstall_app(udid: &str, root: &Path) {
     let Some(bundle) = bundle_id(root) else {
         return;
     };
-    let _ = Command::new("xcrun")
+    let _ = crate::platform::command("xcrun")
         .args(["simctl", "uninstall", udid, &bundle])
         .output();
 }
@@ -435,7 +434,7 @@ pub fn ensure_booted(udid: &str) -> Result<(), String> {
     if udid.is_empty() {
         return Ok(());
     }
-    let out = Command::new("xcrun")
+    let out = crate::platform::command("xcrun")
         .args(["simctl", "boot", udid])
         .output()
         .map_err(|e| e.to_string())?;
@@ -452,8 +451,8 @@ pub fn ensure_booted(udid: &str) -> Result<(), String> {
 /// thread so a caller on the PTY reader thread is never stalled, and the children get reaped.
 pub fn focus_simulator() {
     std::thread::spawn(|| {
-        let _ = Command::new("open").args(["-a", "Simulator"]).status();
-        let _ = Command::new("osascript")
+        let _ = crate::platform::command("open").args(["-a", "Simulator"]).status();
+        let _ = crate::platform::command("osascript")
             .args(["-e", r#"tell application "Simulator" to activate"#])
             .status();
     });
@@ -516,6 +515,7 @@ fn claim_holds(kind: &str, dir: &Path) -> bool {
     match kind {
         "flutter" => dir.join("pubspec.yaml").is_file(),
         "godot" => dir.join("project.godot").is_file(),
+        "electron" => dir.join("package.json").is_file(),
         "native" => {
             dir.join("project.yml").is_file()
                 || dir.join("project.yaml").is_file()
@@ -604,6 +604,19 @@ fn detect(root: &Path) -> Option<(&'static str, PathBuf, bool)> {
                     return Some(("godot", dir, false));
                 }
             }
+            // An Electron app opens its own window on the desktop, like a Godot game. Declared, not
+            // sniffed: a package.json with electron somewhere in its tree is just as often a web app
+            // that ships a shell on the side.
+            Some("electron") => {
+                let dir = manifest
+                    .get("subpath")
+                    .and_then(|s| s.as_str())
+                    .map(|s| root.join(s))
+                    .unwrap_or_else(|| root.to_path_buf());
+                if claim_holds("electron", &dir) {
+                    return Some(("electron", dir, false));
+                }
+            }
             _ => {}
         }
     }
@@ -689,11 +702,17 @@ fn dev_runner_kind(root: &Path) -> Option<String> {
         }
     }
     let kind = runner.and_then(|runner| {
-        let out = Command::new(&runner)
-            .arg("kind")
-            .current_dir(root)
-            .output()
-            .ok()?;
+        // Windows cannot exec a shell script, so it goes through Git Bash; platform::command
+        // keeps the console window from flashing once per project row.
+        #[cfg(windows)]
+        let mut command = {
+            let mut command = crate::platform::command(posix_shell());
+            command.arg(&runner);
+            command
+        };
+        #[cfg(not(windows))]
+        let mut command = crate::platform::command(&runner);
+        let out = command.arg("kind").current_dir(root).output().ok()?;
         if !out.status.success() {
             return None;
         }
@@ -788,7 +807,9 @@ pub fn native_spec(root: &Path) -> Option<(PathBuf, bool)> {
 /// Native projects stay on their own platform; neither Xcode nor Gradle has a web destination.
 pub fn plan(root: &Path, device: &str, family: &str) -> Result<SimRun, String> {
     let (kind, cwd, xcodegen) = detect(root)
-        .ok_or_else(|| "not a Flutter, native iOS, native Android, or Godot project".to_string())?;
+        .ok_or_else(|| {
+            "not a Flutter, native iOS, native Android, Godot, or Electron project".to_string()
+        })?;
     if kind == "native" && !matches!(family, "iphone" | "ipad" | "ios" | "macos") {
         return Err(format!("a native Xcode project cannot run on {family}"));
     }
@@ -798,13 +819,13 @@ pub fn plan(root: &Path, device: &str, family: &str) -> Result<SimRun, String> {
     if kind == "android" && family != "android" {
         return Err(format!("a native Android project cannot run on {family}"));
     }
-    if kind == "ag" && family != "desktop" {
-        return Err(format!("this project runs on the Mac, not on {family}"));
+    if matches!(kind, "ag" | "electron") && family != "desktop" {
+        return Err(format!("this project runs on the desktop, not on {family}"));
     }
     if kind == "godot" && !matches!(family, "desktop" | "android" | "iphone" | "ipad") {
         return Err(format!("a Godot project cannot run on {family}"));
     }
-    let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
+    let shell = posix_shell();
     let script = match kind {
         "flutter" => format!("exec flutter run -d {}", shell_quote(device)),
         "godot" => match family {
@@ -812,6 +833,7 @@ pub fn plan(root: &Path, device: &str, family: &str) -> Result<SimRun, String> {
             "iphone" | "ipad" => godot_ios_script(&cwd, device)?,
             _ => godot_script(&godot_run_args(root)),
         },
+        "electron" => electron_script(&cwd),
         // The manifest's command verbatim, through a login shell so `npm`/`node`/`bun` are on
         // PATH when Panel was opened from Finder. `exec` makes it the pane's own process, so
         // stopping the run actually stops the server rather than orphaning it under a shell.
@@ -853,6 +875,7 @@ fn native_android_script(root: &Path, serial: &str) -> Result<String, String> {
     let adb = shell_quote(&android::adb().to_string_lossy());
     let serial = shell_quote(serial);
     let package = shell_quote(&package);
+    let python = crate::platform::python();
     Ok(format!(
         r#"set -e
 ADB={adb}
@@ -868,7 +891,7 @@ APK=$(find app/build/outputs/apk/debug -maxdepth 1 -name '*.apk' -print)
 [ -f "$APK" ] || {{ echo "error: expected one debug APK in app/build/outputs/apk/debug" >&2; exit 2; }}
 "$ADB" -s "$SERIAL" install -r "$APK"
 if [ -f app/build/outputs/apk/debug/output-metadata.json ]; then
-  PACKAGE=$(python3 -c 'import json; print(json.load(open("app/build/outputs/apk/debug/output-metadata.json"))["applicationId"])')
+  PACKAGE=$({python} -c 'import json; print(json.load(open("app/build/outputs/apk/debug/output-metadata.json"))["applicationId"])')
 fi
 COMPONENT=$("$ADB" -s "$SERIAL" shell cmd package resolve-activity --brief "$PACKAGE" 2>/dev/null | tr -d '\r' | tail -1)
 case "$COMPONENT" in */*) ;; *) echo "error: no launcher activity found for $PACKAGE" >&2; exit 2 ;; esac
@@ -916,6 +939,34 @@ esac; done\n"
     )
 }
 
+/// The shell every run script goes through. The scripts are POSIX, so on Windows that is Git
+/// Bash — found where its installer puts it, because `SHELL` there is unset or an MSYS path, and
+/// a bare `bash.exe` on PATH can resolve to WSL's, which cannot see a Windows project directory.
+pub fn posix_shell() -> String {
+    #[cfg(windows)]
+    {
+        let installs = ["ProgramW6432", "ProgramFiles", "LOCALAPPDATA"]
+            .iter()
+            .filter_map(|var| std::env::var(var).ok())
+            .flat_map(|base| {
+                [
+                    Path::new(&base).join("Git/bin/bash.exe"),
+                    Path::new(&base).join("Programs/Git/bin/bash.exe"),
+                ]
+            });
+        for candidate in installs {
+            if candidate.is_file() {
+                return candidate.to_string_lossy().into_owned();
+            }
+        }
+        "bash.exe".to_string()
+    }
+    #[cfg(not(windows))]
+    {
+        std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string())
+    }
+}
+
 fn shell_quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "'\\''"))
 }
@@ -933,6 +984,13 @@ if [ -z "$GODOT" ]; then
   for bundle in /Applications/Godot.app /Applications/Godot_mono.app "$HOME/Applications/Godot.app"; do
     BIN=$(ls "$bundle/Contents/MacOS/" 2>/dev/null | head -1)
     if [ -n "$BIN" ]; then GODOT="$bundle/Contents/MacOS/$BIN"; break; fi
+  done
+fi
+if [ -z "$GODOT" ]; then
+  # Windows ships Godot as a loose exe. The _console build writes its log into this pane.
+  for dir in "$HOME/Godot" "$HOME/Downloads" "$LOCALAPPDATA/Programs/Godot" "$PROGRAMFILES/Godot"; do
+    BIN=$(ls -1 "$dir"/Godot*_win64_console.exe "$dir"/Godot*_win64.exe 2>/dev/null | sort -r | head -1)
+    if [ -n "$BIN" ]; then GODOT="$BIN"; break; fi
   done
 fi
 if [ -z "$GODOT" ]; then
@@ -1153,6 +1211,27 @@ xcrun simctl terminate "$UDID" "$BID" >/dev/null 2>&1 || true
 echo ">> launching $BID"
 exec xcrun simctl launch --console-pty "$UDID" "$BID""#
     ))
+}
+
+/// Start an Electron app in its own window. The project's own `make run` is the declaration when
+/// it has one — that is where a repo says which of its scripts opens the shell — and `npm start`,
+/// Electron's convention, otherwise. Dependencies are installed first on a fresh clone.
+fn electron_script(dir: &Path) -> String {
+    let makefile = std::fs::read_to_string(dir.join("Makefile")).unwrap_or_default();
+    let start = if makefile.lines().any(|line| line.starts_with("run:")) {
+        "exec make run"
+    } else {
+        "exec npm start"
+    };
+    format!(
+        r#"set -e
+if [ ! -f node_modules/.package-lock.json ]; then
+  echo ">> building: npm install"
+  npm install
+fi
+echo ">> launching Electron"
+{start}"#
+    )
 }
 
 /// Best-effort native run: regenerate/integrate the project when configured, resolve its app
@@ -1408,6 +1487,25 @@ mod tests {
     }
 
     #[test]
+    fn an_electron_app_runs_its_own_make_target_on_the_desktop() {
+        let root = std::env::temp_dir().join(format!("panel-sim-electron-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        std::fs::write(root.join("appgea.json"), r#"{"appType":"electron"}"#).unwrap();
+        std::fs::write(root.join("package.json"), "{}").unwrap();
+        std::fs::write(root.join("Makefile"), "run:\n\tnpm run play\n").unwrap();
+
+        assert_eq!(kind_of(&root), Some("electron"));
+        assert!(plan(&root, "", "iphone").is_err());
+        let run = plan(&root, "", "desktop").unwrap();
+        assert_eq!(run.kind, "electron");
+        let script = &run.args[1];
+        assert!(script.contains("exec make run"), "{script}");
+        assert!(!script.contains("simctl"), "{script}");
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[test]
     fn a_godot_project_runs_without_a_simulator() {
         let root = std::env::temp_dir().join(format!("panel-sim-godot-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
@@ -1554,7 +1652,8 @@ package/unique_name="com.example.game"
 
     #[test]
     fn shared_runner_rereads_an_electron_launcher_added_while_panel_is_open() {
-        let root = std::env::temp_dir().join(format!("panel-sim-electron-{}", std::process::id()));
+        // Its own folder: the Electron plan test runs in parallel and owns `panel-sim-electron-`.
+        let root = std::env::temp_dir().join(format!("panel-sim-electron-runner-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
         assert_eq!(kind_of(&root), None);
@@ -1563,7 +1662,7 @@ package/unique_name="com.example.game"
         let runner = root.with_extension("runner.sh");
         std::fs::write(
             &runner,
-            "#!/bin/sh\nif grep -q electron appgea.json 2>/dev/null; then echo electron\n\
+            "#!/bin/sh\nif grep -q '\"electron ' package.json 2>/dev/null; then echo electron\n\
              elif [ -f Makefile ]; then echo make\nelif [ -f package.json ]; then echo node\n\
              else echo unknown; fi\n",
         )
@@ -1573,7 +1672,8 @@ package/unique_name="com.example.game"
         TEST_RUNNER.with(|slot| *slot.borrow_mut() = Some(runner.clone()));
         assert_eq!(kind_of(&root), None);
 
-        std::fs::write(root.join("appgea.json"), r#"{"appType":"electron"}"#).unwrap();
+        // Undeclared on purpose. An appgea.json saying `electron` is Panel's own run now, and the
+        // runner only answers for what no built-in kind claims.
         std::fs::write(
             root.join("package.json"),
             r#"{"scripts":{"dev":"vite","play":"electron ."}}"#,
@@ -1586,7 +1686,7 @@ package/unique_name="com.example.game"
         assert!(run.args[1].contains(&*runner.to_string_lossy()));
         assert!(plan(&root, "macos", "macos").is_err());
 
-        std::fs::remove_file(root.join("appgea.json")).unwrap();
+        std::fs::write(root.join("package.json"), r#"{"scripts":{"dev":"vite"}}"#).unwrap();
         assert_eq!(dev_runner_kind(&root).as_deref(), Some("node"));
         std::fs::write(root.join("Makefile"), "run:\n\techo desktop\n").unwrap();
         assert_eq!(dev_runner_kind(&root).as_deref(), Some("make"));

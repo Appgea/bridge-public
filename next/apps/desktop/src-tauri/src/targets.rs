@@ -25,7 +25,6 @@ use crate::leases;
 use crate::sim;
 use serde::Serialize;
 use std::path::Path;
-use std::process::Command;
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -46,7 +45,7 @@ pub struct Target {
 }
 
 /// Families with exactly one member, addressed by the family name alone.
-pub const SINGLETON: [&str; 3] = ["chrome", "macos", "desktop"];
+pub const SINGLETON: [&str; 4] = ["chrome", "macos", "windows", "desktop"];
 
 pub fn is_singleton(family: &str) -> bool {
     SINGLETON.contains(&family)
@@ -90,6 +89,7 @@ pub fn families_for(root: &Path, kind: &str) -> Vec<&'static str> {
             }
             families
         }
+        "electron" => vec!["desktop"],
         // A dev server runs in exactly one place: the port its manifest pins. There is no choice
         // to offer, and offering one would only let the human pick a port the server will not
         // listen on.
@@ -129,8 +129,13 @@ pub fn families_for(root: &Path, kind: &str) -> Vec<&'static str> {
             if dir.join("web").is_dir() {
                 families.push("chrome");
             }
-            if dir.join("macos").is_dir() {
+            // A desktop build runs only on its own OS: the Mac row on a Mac, the Windows row on
+            // Windows. Offering the other one could only produce a toolchain error.
+            if cfg!(target_os = "macos") && dir.join("macos").is_dir() {
                 families.push("macos");
+            }
+            if cfg!(windows) && dir.join("windows").is_dir() {
+                families.push("windows");
             }
             // Both halves have to be true: the project must have an Android platform folder, and
             // this machine must have an SDK to talk to. Offering the family without a `adb` only
@@ -254,6 +259,7 @@ fn singleton_label(family: &str) -> &'static str {
     match family {
         "chrome" => "Chrome",
         "macos" => "Mac",
+        "windows" => "Windows",
         _ => "Desktop",
     }
 }
@@ -296,7 +302,7 @@ pub fn android_devices() -> Vec<Target> {
 /// Paired iPhones and iPads reachable over USB or Xcode's wireless connection.
 /// Physical devices have their own family, outside simulator boot, wipe and shutdown paths.
 pub fn ios_devices() -> Vec<Target> {
-    let Ok(output) = Command::new("xcrun")
+    let Ok(output) = crate::platform::command("xcrun")
         .args(["xcdevice", "list", "--timeout", "5"])
         .output()
     else {

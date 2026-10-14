@@ -120,7 +120,7 @@ pub fn codex_args(panel_home: &Path, port: u16, instance: &str) -> AgentLaunch {
                 quote("approve")
             ),
             "-c".into(),
-            format!("mcp_servers.appgea-panel.command={}", quote("python3")),
+            format!("mcp_servers.appgea-panel.command={}", quote(crate::platform::python())),
             "-c".into(),
             format!(
                 "mcp_servers.appgea-panel.args=[{}]",
@@ -181,7 +181,7 @@ fn write_settings(panel_home: &Path, instance: &str) -> Option<PathBuf> {
     // The hook command is a SHELL line. Panel installs to "…/Appgea Panel.app", so an unquoted
     // path splits at the space and every prompt dies on "can't open file '/Users/…/Panel'".
     let forwarder = shell_quote(&forwarder.to_string_lossy());
-    let run = json!([{ "type": "command", "command": format!("python3 {forwarder}") }]);
+    let run = json!([{ "type": "command", "command": format!("{} {forwarder}", crate::platform::python()) }]);
 
     let settings = json!({
         "hooks": {
@@ -224,7 +224,7 @@ fn write_mcp(panel_home: &Path, port: u16, instance: &str) -> Option<PathBuf> {
     let config = json!({
         "mcpServers": {
             "appgea-panel": {
-                "command": "python3",
+                "command": crate::platform::python(),
                 "args": [server.to_string_lossy()],
                 "env": { "PANEL_PORT": port.to_string(), "PANEL_INSTANCE": instance },
             }

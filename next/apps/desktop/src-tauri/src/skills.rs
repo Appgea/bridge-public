@@ -81,15 +81,12 @@ fn connect(dir: &Path) -> Result<(), String> {
         for link in bindings(dir)? {
             if fs::symlink_metadata(&link).is_ok() { continue; }
             fs::create_dir_all(link.parent().ok_or("Invalid skill link")?).map_err(|e| e.to_string())?;
-            #[cfg(unix)]
-            std::os::unix::fs::symlink(dir, &link).map_err(|e| e.to_string())?;
-            #[cfg(not(unix))]
-            return Err("Shared skill links require Unix".into());
+            crate::platform::link_dir(dir, &link)?;
             created.push(link);
         }
         Ok(())
     })();
-    if result.is_err() { for link in created { let _ = fs::remove_file(link); } }
+    if result.is_err() { for link in created { let _ = crate::platform::remove_link(&link); } }
     result
 }
 fn bounded_read(path: &Path) -> Result<String, String> {
@@ -553,7 +550,7 @@ pub fn archive(path: String) -> Result<(), String> {
     for link in bindings(dir)? {
         if fs::symlink_metadata(&link).is_ok_and(|m| m.file_type().is_symlink())
             && link.canonicalize().ok().as_deref() == Some(dir) {
-            fs::remove_file(link).map_err(|e| e.to_string())?;
+            crate::platform::remove_link(&link)?;
         }
     }
     if !marker.exists() {

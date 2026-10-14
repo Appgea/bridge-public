@@ -45,7 +45,7 @@ pub(crate) fn safe_key(project: &str) -> String {
 /// Local wall clock as `YYYY-MM-DD HH:MM`. No chrono in this tree, and a log entry only needs to
 /// be sortable and readable — not a timestamp anything parses back.
 fn now_local() -> String {
-    let out = std::process::Command::new("date")
+    let out = crate::platform::command("date")
         .args(["+%Y-%m-%d %H:%M"])
         .output()
         .ok()

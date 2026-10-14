@@ -3,13 +3,20 @@
 
 .panel-editor .cm-editor { height: 100%; }
 
+.panel-editor {
+  /* Xcode's breakpoint blue and instruction-pointer green. One source for the gutter tag and
+     the minimap strip, which reads these back from the computed style. */
+  --cm-breakpoint: #3a7ee8;
+  --cm-exec: #4ca64c;
+}
+
 /* Indentation is structure, not whitespace decoration. Each visible line carries one bounded
-   repeating rule that stops at its leading text. Tabs and spaces both resolve to columns. */
+   repeating rule that stops at its leading text. The 6px matches `.cm-line`'s left padding. */
 .panel-editor .cm-indent-guided { position: relative; }
 .panel-editor .cm-indent-guided::before {
   content: "";
   position: absolute;
-  inset: 0 auto 0 4px;
+  inset: 0 auto 0 6px;
   width: calc(var(--cm-indent-columns) * 1ch);
   pointer-events: none;
   background: repeating-linear-gradient(
@@ -19,85 +26,153 @@
   );
 }
 
-/* Nested scope lines pin over the source, inside the content edge. They never move layout. */
+/* ----------------------------------------------------------- sticky scopes */
+
+/* Scope headers pinned over the source. A row is the line it repeats: the number on the
+   gutter's own edge, the code at the content's own column, the buffer's own line height. */
 .panel-editor .cm-sticky-scroll {
   position: absolute;
-  right: 84px;
+  left: 0;
+  right: 0;
   z-index: 6;
   overflow: hidden;
-  border-bottom: 1px solid var(--line);
   background: var(--cm-editor-bg);
+  box-shadow: 0 1px 0 color-mix(in oklab, var(--cm-gutter-ink) 30%, transparent), 0 4px 8px -6px rgba(0, 0, 0, 0.45);
+  font-family: var(--font-mono);
   pointer-events: none;
 }
 .panel-editor .cm-sticky-scroll[hidden] { display: none; }
 .panel-editor .cm-sticky-row {
+  position: relative;
+  display: block;
   width: 100%;
-  height: 22px;
-  display: grid;
-  grid-template-columns: 32px minmax(0, 1fr);
-  align-items: center;
-  gap: 8px;
-  padding: 0 10px 0 4px;
+  height: var(--sticky-row, 16px);
+  padding: 0;
   border: 0;
-  background: transparent;
+  border-radius: 0;
+  background: var(--cm-editor-bg);
   color: inherit;
   font: inherit;
+  line-height: var(--sticky-row, 16px);
   text-align: left;
+  cursor: default;
   pointer-events: auto;
 }
-.panel-editor .cm-sticky-row:hover {
-  background: color-mix(in oklab, var(--ink) 6%, transparent);
-  transform: none;
+.panel-editor .cm-sticky-row:hover,
+.panel-editor .cm-sticky-row:active {
+  background: color-mix(in oklab, var(--cm-editor-bg) 90%, #888);
 }
-.panel-editor .cm-sticky-row > span {
-  color: var(--ink-faint);
-  font-size: var(--text-xs);
+.panel-editor .cm-sticky-num {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  color: var(--cm-gutter-ink);
+  font-size: 0.86em;
+  font-variant-numeric: tabular-nums;
   text-align: right;
 }
 .panel-editor .cm-sticky-row > code {
-  overflow: hidden;
+  position: absolute;
+  top: 0;
+  height: 100%;
   color: inherit;
   font: inherit;
-  text-overflow: ellipsis;
   white-space: pre;
+  transform: translateX(var(--sticky-shift, 0px));
 }
 
-/* The minimap. A canvas pinned to the editor's right edge; its height is set from the
-   scroller by the plugin so it never overlaps a bottom panel. All painting is rAF-coalesced
-   blits of a cached offscreen — nothing here animates, so no motion rules apply. */
+/* ----------------------------------------------------------------- minimap */
+
+/* A canvas pinned to the editor's right edge, above the sticky scopes so a header never
+   covers it. All painting is rAF-coalesced; nothing here animates. */
 .cm-minimap {
   position: absolute;
   top: 0;
   right: 0;
-  width: 72px;
-  z-index: 3;
-  cursor: pointer;
+  z-index: 7;
+  cursor: default;
   pointer-events: auto;
 }
-.cm-minimap:active { cursor: grabbing; }
+/* The scope under the pointer, Xcode's minimap hover: one line of chrome beside the map. */
+.cm-minimap-label {
+  position: absolute;
+  z-index: 8;
+  max-width: 50%;
+  padding: 3px 8px;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--bg-raised);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.28);
+  color: var(--ink);
+  font: 600 11px/1.3 var(--font-ui, -apple-system, BlinkMacSystemFont, sans-serif);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  pointer-events: none;
+}
+.cm-minimap-label[hidden] { display: none; }
 
 /* The minimap carries scroll position now; the native bar would be a second voice. */
 .panel-editor .cm-scroller { scrollbar-width: none; }
 .panel-editor .cm-scroller::-webkit-scrollbar { width: 0; height: 0; }
 
-/* Breakpoints sit in their own narrow gutter. The hit area is wider than the dot, while the
-   marker stays visually quiet until a line is armed. */
-.panel-editor .cm-breakpoint-gutter {
-  width: 16px;
-  cursor: pointer;
+/* ----------------------------------------------------------------- gutter */
+
+/* Xcode's breakpoint: a blue tag over the line number, the number in white. The tag is drawn
+   behind the number inside the same cell, so the gutter never widens to make room for it. */
+.panel-editor .cm-lineNumbers .cm-gutterElement { position: relative; cursor: default; }
+.panel-editor .cm-lineNumbers .cm-gutterElement.cm-bp,
+.panel-editor .cm-lineNumbers .cm-gutterElement.cm-exec {
+  isolation: isolate;
+  color: #fff;
 }
-.panel-editor .cm-breakpoint-gutter .cm-gutterElement {
+.panel-editor .cm-lineNumbers .cm-gutterElement.cm-bp::before,
+.panel-editor .cm-lineNumbers .cm-gutterElement.cm-exec::after {
+  content: "";
+  position: absolute;
+  inset: 1px -2px 1px 4px;
+  z-index: -1;
+  border-radius: 2px 0 0 2px;
+  clip-path: polygon(0 0, calc(100% - 6px) 0, 100% 50%, calc(100% - 6px) 100%, 0 100%);
+}
+.panel-editor .cm-lineNumbers .cm-gutterElement.cm-bp::before { background: var(--cm-breakpoint); }
+/* Where the program stopped. Drawn after, so it reads on top of a breakpoint on the same line. */
+.panel-editor .cm-lineNumbers .cm-gutterElement.cm-exec::after {
+  inset: 3px -2px 3px 10px;
+  background: var(--cm-exec);
+}
+
+/* The fold ribbon. Chevrons show while the pointer is over the gutter, as in Xcode; a folded
+   range keeps its chevron so you can always see what is hidden. */
+.panel-editor .cm-foldGutter .cm-gutterElement {
   display: grid;
   place-items: center;
+  width: 13px;
+  cursor: default;
 }
-.cm-breakpoint-dot {
-  display: block;
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--risk);
-  box-shadow: 0 0 0 1px color-mix(in oklab, var(--risk) 64%, #000);
+.cm-fold-mark {
+  display: grid;
+  place-items: center;
+  width: 12px;
+  height: 100%;
+  color: var(--cm-gutter-ink);
+  opacity: 0;
+  transition: opacity var(--fast) var(--ease);
 }
+.cm-fold-mark svg {
+  width: 9px;
+  height: 9px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.cm-fold-mark.is-open svg { transform: rotate(90deg); }
+.panel-editor .cm-gutters:hover .cm-fold-mark { opacity: 1; }
+.cm-fold-mark.is-folded { opacity: 1; color: var(--accent); }
+.cm-fold-mark:hover { color: var(--ink); }
 
 /* The jump target. The highlight is an overlay behind the glyphs whose OPACITY fades — the
    text never dims, nothing reflows, and the eye is released after a beat. */
@@ -119,16 +194,15 @@
 }
 
 /* Where the program is STOPPED. Not a flash: it holds while the debugger is paused, so it has
-   to be readable next to a caret without pretending to be the selection. Amber and a left rule:
-   the one band of colour the buffer wears, and it means exactly one thing. */
+   to be readable next to a caret without pretending to be the selection. Xcode's green band,
+   matching the green tag on its line number. It means exactly one thing. */
 .cm-execLine { position: relative; }
 .cm-execLine::before {
   content: "";
   position: absolute;
   inset: 0;
   z-index: -1;
-  background: color-mix(in oklab, var(--warn) 17%, transparent);
-  border-left: 2px solid var(--warn);
+  background: color-mix(in oklab, var(--cm-exec, #4ca64c) 20%, transparent);
 }
 /* The paused value under the pointer. Name in ink, value in mono — the value is the answer,
    the name is only there to prove the tooltip read what you meant. */
@@ -143,7 +217,7 @@
 .cm-valueTip b { color: var(--ink-dim); font-weight: 600; }
 .cm-valueTip span {
   color: var(--ink);
-  font-family: ui-monospace, Menlo, monospace;
+  font-family: var(--font-mono);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: pre-wrap;
@@ -199,7 +273,7 @@
 
 /* -------------------------------------------------- git change bars */
 
-/* A hairline column between the breakpoints and the line numbers. It has to be readable at a
+/* A hairline column between the line numbers and the fold ribbon. It has to be readable at a
    glance and invisible when you are reading code, so it is 2px of colour and nothing else —
    no background, no border, nothing that widens the gutter as you type. */
 .panel-editor .cm-change-gutter {
@@ -270,7 +344,6 @@
 .panel-editor .cm-hunk-popover button:hover:not(:disabled) {
   border-color: var(--accent);
   color: var(--ink);
-  transform: none;
 }
 .panel-editor .cm-hunk-popover button.is-danger { color: var(--risk); }
 .panel-editor .cm-hunk-preview {
@@ -280,7 +353,7 @@
   padding: 5px 0;
   background: var(--cm-editor-bg);
   color: inherit;
-  font: var(--text-xs)/1.55 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font: var(--text-xs)/1.55 var(--font-mono);
 }
 .panel-editor .cm-hunk-row {
   display: grid;
@@ -309,3 +382,91 @@
   color: var(--ink-faint);
   font-size: var(--text-xs);
 }
+
+/* -------------------------------------------------------------- find bar */
+
+/* Xcode's find bar, at the top of the buffer. One row to find, a second to replace. The field
+   counts as you type and turns red when there is nothing to find. */
+.cm-xfind {
+  display: grid;
+  gap: 4px;
+  padding: 5px 8px;
+  font: 12px/1 var(--font-ui, -apple-system, BlinkMacSystemFont, sans-serif);
+}
+.cm-xfind-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.cm-xfind-row[hidden] { display: none; }
+.cm-xfind button {
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  height: 22px;
+  padding: 0 8px;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--ink-dim);
+  font: inherit;
+  cursor: default;
+}
+.cm-xfind button:hover {
+  background: color-mix(in oklab, var(--ink) 9%, transparent);
+  color: var(--ink);
+}
+.cm-xfind-mode,
+.cm-xfind-mode-spacer {
+  width: 64px;
+  justify-content: start;
+  font-weight: 600;
+}
+.cm-xfind-mode-spacer { flex: none; }
+.cm-xfind-field {
+  position: relative;
+  display: flex;
+  align-items: center;
+  flex: 1 1 260px;
+  min-width: 120px;
+  max-width: 520px;
+  height: 22px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: var(--bg);
+}
+.cm-xfind-field:focus-within { border-color: color-mix(in oklab, var(--accent) 70%, var(--line)); }
+.cm-xfind-field.is-miss { border-color: var(--risk); background: color-mix(in oklab, var(--risk) 8%, var(--bg)); }
+.cm-xfind-field input {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  padding: 0 7px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--ink);
+  font: 12px/1 var(--font-mono);
+}
+.cm-xfind-count {
+  flex: none;
+  padding-right: 7px;
+  color: var(--ink-faint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.cm-xfind-field.is-miss .cm-xfind-count { color: var(--risk); }
+.cm-xfind .cm-xfind-step { width: 22px; padding: 0; font-size: 15px; }
+.cm-xfind .cm-xfind-toggle {
+  min-width: 26px;
+  padding: 0 5px;
+  font: 600 11px/1 var(--font-mono);
+}
+.cm-xfind .cm-xfind-toggle[aria-pressed="true"] {
+  border-color: color-mix(in oklab, var(--accent) 45%, transparent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+.cm-xfind .cm-xfind-done { margin-left: auto; }

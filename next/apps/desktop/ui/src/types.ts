@@ -147,7 +147,7 @@ export type SimTarget = {
   families: DeviceFamily[];
 };
 
-export type DeviceFamily = "iphone" | "ipad" | "ios" | "android" | "chrome" | "macos" | "desktop";
+export type DeviceFamily = "iphone" | "ipad" | "ios" | "android" | "chrome" | "macos" | "windows" | "desktop";
 
 /** One place an app can run, from `run_targets`. The `id` is the address every other surface
  *  speaks — leases, run plans, the picker — so nothing downstream has to parse a device name. */

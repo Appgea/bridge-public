@@ -322,13 +322,9 @@ pub fn uninstall(panel_home: &Path, name: &str) -> Result<Vec<CatalogEntry>, Str
 /// Is a command reachable? `which` rather than a PATH walk, so shell builtins and shims resolve
 /// the same way they will when the module actually runs.
 fn on_path(command: &str) -> bool {
-    Command::new("which")
-        .arg(command)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|status| status.success())
-        .unwrap_or(false)
+    // Manifests say `python3`; `interpreter` runs whatever this platform calls Python.
+    let command = if command == "python3" { crate::platform::python() } else { command };
+    crate::platform::on_path(command)
 }
 
 fn manifest_at(root: &Path) -> Option<Manifest> {
@@ -474,7 +470,7 @@ fn serve_asset(assets: &Path, name: &str) -> Response {
 }
 
 fn module_command(manifest: &Manifest, method: &str, path: &str) -> Command {
-    let mut command = Command::new(interpreter(&manifest.exec));
+    let mut command = crate::platform::command(interpreter(&manifest.exec));
     if manifest.exec.extension().and_then(|e| e.to_str()) == Some("py") {
         // Imports must not add bytecode caches to the signed resource tree.
         command.arg("-B").arg(&manifest.exec);
@@ -592,7 +588,7 @@ fn parse(stdout: &[u8], stderr: &[u8]) -> Response {
 
 fn interpreter(exec: &Path) -> PathBuf {
     if exec.extension().and_then(|e| e.to_str()) == Some("py") {
-        PathBuf::from("python3")
+        PathBuf::from(crate::platform::python())
     } else {
         exec.to_path_buf()
     }

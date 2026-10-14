@@ -1,4 +1,22 @@
-export { createCodeEditor, indentLabel, wrapsByDefault, type CodeEditor, type CodeEditorOptions } from "./core";
+export {
+  createCodeEditor,
+  indentLabel,
+  outlineChanged,
+  wrapsByDefault,
+  type CodeEditor,
+  type CodeEditorOptions,
+  type ScrollSpot,
+} from "./core";
+export { outline, scopeAt, markAt, type OutlineItem, type OutlineKind } from "./outline";
+export type { SymbolTable } from "./semantic";
+export {
+  mountJumpBar,
+  symbolBadge,
+  type JumpBar,
+  type JumpCrumb,
+  type JumpMenuItem,
+  type JumpMenuSpec,
+} from "./jump_bar";
 export { currentMode, themePacks, type ThemeMode } from "./theme";
 export { fileExtension, languageFor } from "./languages";
 export { mountQuickOpen, type QuickOpen, type QuickOpenList, type QuickOpenTarget } from "./quick_open";

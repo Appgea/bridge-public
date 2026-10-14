@@ -17,6 +17,7 @@ mod modules;
 mod notebook;
 mod ops;
 mod paths;
+mod platform;
 mod projects;
 mod project_desk;
 mod reports;
@@ -33,7 +34,7 @@ use projects::{GitOverview, GitState, Project, ProjectRole, WorkFile};
 use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::Stdio;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -872,11 +873,11 @@ async fn open_project_folder(project: String, path: Option<String>) -> Result<()
 
 fn open_folder(folder: &Path) -> Result<(), String> {
     #[cfg(target_os = "macos")]
-    let mut command = Command::new("open");
+    let mut command = crate::platform::command("open");
     #[cfg(target_os = "windows")]
-    let mut command = Command::new("explorer");
+    let mut command = crate::platform::command("explorer");
     #[cfg(all(unix, not(target_os = "macos")))]
-    let mut command = Command::new("xdg-open");
+    let mut command = crate::platform::command("xdg-open");
 
     command
         .arg(folder)
@@ -905,11 +906,11 @@ fn open_revenuecat_setup(project_id: Option<String>) -> Result<(), String> {
         .unwrap_or_else(|| "https://app.revenuecat.com/projects/".to_string());
 
     #[cfg(target_os = "macos")]
-    let mut command = Command::new("open");
+    let mut command = crate::platform::command("open");
     #[cfg(target_os = "windows")]
-    let mut command = Command::new("explorer");
+    let mut command = crate::platform::command("explorer");
     #[cfg(all(unix, not(target_os = "macos")))]
-    let mut command = Command::new("xdg-open");
+    let mut command = crate::platform::command("xdg-open");
     command
         .arg(url)
         .spawn()
@@ -1660,7 +1661,7 @@ async fn session_busy(state: State<'_, DesktopState>, session: String) -> Result
 fn process_cwd(pid: u32) -> Result<Option<String>, String> {
     // `lsof -Fn` is the one interface that needs no entitlement and no extra crate: -d cwd asks
     // for exactly one descriptor, so this is a single short read, not a scan of every open file.
-    let out = std::process::Command::new("/usr/sbin/lsof")
+    let out = crate::platform::command("/usr/sbin/lsof")
         .args(["-a", "-d", "cwd", "-Fn", "-p", &pid.to_string()])
         .output()
         .map_err(|error| error.to_string())?;
@@ -2587,7 +2588,7 @@ fn open_url(url: &str) {
     }
     let url = url.to_string();
     std::thread::spawn(move || {
-        let _ = std::process::Command::new("open").arg(&url).status();
+        let _ = platform::open(&url).status();
     });
 }
 
@@ -2607,7 +2608,7 @@ fn web_link(url: &str) -> bool {
 #[tauri::command]
 async fn clipboard_text() -> Result<String, String> {
     off_main(|| {
-        let out = Command::new("pbpaste")
+        let out = crate::platform::command("pbpaste")
             .output()
             .map_err(|error| format!("could not read the clipboard: {error}"))?;
         Ok(String::from_utf8_lossy(&out.stdout).into_owned())
@@ -2647,11 +2648,11 @@ async fn open_media(project: String, path: String) -> Result<(), String> {
             return Err(format!("not a file: {}", file.display()));
         }
         #[cfg(target_os = "macos")]
-        let mut command = Command::new("open");
+        let mut command = crate::platform::command("open");
         #[cfg(target_os = "windows")]
-        let mut command = Command::new("explorer");
+        let mut command = crate::platform::command("explorer");
         #[cfg(all(unix, not(target_os = "macos")))]
-        let mut command = Command::new("xdg-open");
+        let mut command = crate::platform::command("xdg-open");
         command
             .arg(&file)
             .stdout(Stdio::null())
@@ -2837,6 +2838,16 @@ async fn symbol_locations(
         let root = find_project(&project)?.path;
         let file = confine(&root, &path)?;
         code_nav::symbol_locations(&root, &file, &symbol)
+    })
+    .await
+}
+
+/// Every name the project declares, for the editor's project-symbol colouring and Open Quickly.
+#[tauri::command]
+async fn project_symbols(project: String) -> Result<Vec<code_nav::ProjectSymbol>, String> {
+    off_main(move || {
+        let root = find_project(&project)?.path;
+        code_nav::project_symbols(&root)
     })
     .await
 }
@@ -3112,14 +3123,24 @@ async fn reveal_entry(project: String, path: String) -> Result<(), String> {
         let target = confine(&find_project(&project)?.path, &path)?;
         #[cfg(target_os = "macos")]
         {
-            Command::new("open")
+            crate::platform::command("open")
                 .arg("-R")
                 .arg(&target)
                 .spawn()
                 .map(|_| ())
                 .map_err(|error| format!("could not reveal {}: {error}", target.display()))
         }
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(target_os = "windows")]
+        {
+            let mut select = std::ffi::OsString::from("/select,");
+            select.push(&target);
+            crate::platform::command("explorer")
+                .arg(select)
+                .spawn()
+                .map(|_| ())
+                .map_err(|error| format!("could not reveal {}: {error}", target.display()))
+        }
+        #[cfg(all(unix, not(target_os = "macos")))]
         {
             open_folder(target.parent().unwrap_or(&target))
         }
@@ -3277,7 +3298,7 @@ fn ensure_login_path() {
     const OPEN: &str = "__PANEL_PATH__";
     const CLOSE: &str = "__END_PANEL_PATH__";
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/zsh".to_string());
-    let Ok(output) = Command::new(&shell)
+    let Ok(output) = crate::platform::command(&shell)
         .args(["-ilc", &format!("printf '{OPEN}%s{CLOSE}' \"$PATH\"")])
         .output()
     else {
@@ -3330,10 +3351,15 @@ fn selftest() -> i32 {
     );
     let dir = std::env::temp_dir();
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".to_string());
+    let shell_case: (&str, &[&str]) = if cfg!(windows) {
+        ("powershell.exe", &["-NoProfile", "-Command", "echo PANEL_SHELL_OK"])
+    } else {
+        (&shell, &["-lc", "echo PANEL_SHELL_OK"])
+    };
 
     // (label, program, args). Empty program = baseline shell running a marker echo.
     let cases: [(&str, &str, &[&str]); 8] = [
-        ("shell", &shell, &["-lc", "echo PANEL_SHELL_OK"]),
+        ("shell", shell_case.0, shell_case.1),
         ("claude", "claude", &["--version"]),
         ("codex", "codex", &["--version"]),
         ("grok", "grok", &["--version"]),
@@ -3409,6 +3435,15 @@ fn main() {
     #[cfg(not(windows))]
     if std::env::var_os("PANEL_NO_PATHFIX").is_none() {
         ensure_login_path();
+    }
+    // Windows names the home folder USERPROFILE and leaves HOME unset outside Git Bash. Every
+    // path Panel owns hangs off HOME, so without this `~/.appgeapanel` lands in whatever
+    // directory the app was started from.
+    #[cfg(windows)]
+    if std::env::var_os("HOME").is_none() {
+        if let Some(profile) = std::env::var_os("USERPROFILE") {
+            std::env::set_var("HOME", profile);
+        }
     }
 
     // Headless confirmation that a terminal actually spawns, driving the real PTY path
@@ -3568,6 +3603,7 @@ fn main() {
             file_changes,
             file_relationships,
             symbol_locations,
+            project_symbols,
             search_project,
             git_file_states,
             git_head_file,

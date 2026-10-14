@@ -100,6 +100,8 @@ const DEFINITION_WORDS: &[&str] = &[
     "enum",
     "extension",
     "fn",
+    "fun",
+    "func",
     "function",
     "interface",
     "mixin",
@@ -107,8 +109,19 @@ const DEFINITION_WORDS: &[&str] = &[
     "struct",
     "trait",
     "type",
+    "typealias",
     "typedef",
 ];
+
+/// Where symbol colouring may learn names from. Prose and config would teach it nonsense: "the
+/// type system" in a README is not a declaration of `system`.
+const SYMBOL_EXTENSIONS: &[&str] = &[
+    "c", "cc", "cpp", "cxx", "dart", "go", "h", "hpp", "java", "js", "jsx", "kt", "kts", "mjs",
+    "php", "py", "pyi", "rb", "rs", "swift", "ts", "tsx",
+];
+
+/// Past this a project is generated code, and the editor would rather colour less than wait.
+const MAX_PROJECT_SYMBOLS: usize = 40_000;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct FileRelation {
@@ -124,6 +137,17 @@ pub struct SymbolLocation {
     pub path: String,
     pub line: u32,
     pub detail: String,
+}
+
+/// A name the project itself declares, for the editor's Xcode-style colouring (project symbols
+/// one hue, everything the SDK brings another) and for Open Quickly.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct ProjectSymbol {
+    pub name: String,
+    pub path: String,
+    pub line: u32,
+    /// `class`, `struct`, `enum`, `protocol`, `type`, `function` or `constant`.
+    pub kind: &'static str,
 }
 
 /// One matching line. `column` is a 1-indexed CHAR offset, not a byte offset — the frontend
@@ -173,6 +197,8 @@ struct RankedRelation {
 struct FileFacts {
     literals: Vec<(String, u32)>,
     definitions: Vec<(String, u32)>,
+    /// The subset of `definitions` worth colouring project-wide, with what kind of name each is.
+    symbols: Vec<(String, u32, &'static str)>,
     /// Every identifier and the first line it appears on.
     idents: HashMap<String, u32>,
     /// Lines carrying import vocabulary, with the identifiers on them — for unquoted imports.
@@ -201,9 +227,15 @@ impl FileFacts {
                 imports.push((number, words.iter().map(|word| (*word).to_string()).collect()));
             }
         }
+        let declared = declarations(text);
+        let symbols = declared
+            .iter()
+            .filter_map(|item| symbol_kind(item).map(|kind| (item.name.clone(), item.line, kind)))
+            .collect();
         Self {
             literals: quoted_literals(text),
-            definitions: definitions(text),
+            definitions: declared.into_iter().map(|item| (item.name, item.line)).collect(),
+            symbols,
             idents,
             imports,
         }
@@ -542,6 +574,39 @@ pub fn symbol_locations(
         .collect())
 }
 
+/// Every name the project declares, for symbol colouring and Open Quickly. Served from the same
+/// facts cache go-to-definition uses, so a warm project answers with one stat per file.
+pub fn project_symbols(root: &Path) -> Result<Vec<ProjectSymbol>, String> {
+    let root = root.canonicalize().map_err(|error| error.to_string())?;
+    let mut cache = facts_cache().lock().unwrap_or_else(|poisoned| poisoned.into_inner());
+    let project = cache.project(&root);
+    refresh_facts(project, &root);
+    let mut symbols = Vec::new();
+    for (relative, cached) in project.iter() {
+        let Some(facts) = cached.facts.as_ref() else {
+            continue;
+        };
+        let code = Path::new(relative)
+            .extension()
+            .and_then(|value| value.to_str())
+            .is_some_and(|extension| SYMBOL_EXTENSIONS.contains(&extension));
+        if !code || relative.split('/').any(|part| part.starts_with('.')) {
+            continue;
+        }
+        for (name, line, kind) in &facts.symbols {
+            symbols.push(ProjectSymbol {
+                name: name.clone(),
+                path: relative.clone(),
+                line: *line,
+                kind,
+            });
+        }
+    }
+    symbols.sort_by(|a, b| a.name.cmp(&b.name).then_with(|| a.path.cmp(&b.path)));
+    symbols.truncate(MAX_PROJECT_SYMBOLS);
+    Ok(symbols)
+}
+
 fn insert_relation(
     found: &mut HashMap<(String, String), RankedRelation>,
     relation: FileRelation,
@@ -791,9 +856,23 @@ fn quoted_literals(text: &str) -> Vec<(String, u32)> {
     values
 }
 
-fn definitions(text: &str) -> Vec<(String, u32)> {
-    let mut result = Vec::new();
+/// One `keyword name` pair, as the definition scan saw it.
+struct Declaration {
+    name: String,
+    line: u32,
+    keyword: &'static str,
+    /// The line starts with whitespace — inside a body, not at the top of the file.
+    indented: bool,
+}
+
+/// Every `keyword name` pair in the text. Go-to-definition reads all of them; symbol colouring
+/// reads the ones `symbol_kind` keeps. One scan, so the two can never disagree about what a
+/// declaration looks like.
+fn declarations(text: &str) -> Vec<Declaration> {
+    let mut result: Vec<Declaration> = Vec::new();
     for (line_index, line) in text.lines().enumerate() {
+        let number = (line_index + 1) as u32;
+        let indented = line.starts_with([' ', '\t']);
         let tokens: Vec<&str> = line
             .split(|character: char| {
                 !character.is_alphanumeric() && character != '_' && character != '$'
@@ -801,15 +880,47 @@ fn definitions(text: &str) -> Vec<(String, u32)> {
             .filter(|token| !token.is_empty())
             .collect();
         for pair in tokens.windows(2) {
-            if DEFINITION_WORDS.contains(&pair[0]) && is_identifier(pair[1]) {
-                let item = (pair[1].to_string(), (line_index + 1) as u32);
-                if !result.contains(&item) {
-                    result.push(item);
-                }
+            let Some(keyword) = DEFINITION_WORDS.iter().find(|word| **word == pair[0]) else {
+                continue;
+            };
+            if !is_identifier(pair[1]) {
+                continue;
+            }
+            // A name can only repeat on its own line, so only this line's tail is checked.
+            let repeated = result
+                .iter()
+                .rev()
+                .take_while(|item| item.line == number)
+                .any(|item| item.name == pair[1]);
+            if !repeated {
+                result.push(Declaration {
+                    name: pair[1].to_string(),
+                    line: number,
+                    keyword,
+                    indented,
+                });
             }
         }
     }
     result
+}
+
+/// What colour a declaration earns, or None when it should stay plain. An indented `const` is a
+/// local — colouring every `tab` in a file because one function declared one would turn the
+/// whole buffer teal. `extension String` names the SDK's type, not ours.
+fn symbol_kind(item: &Declaration) -> Option<&'static str> {
+    match item.keyword {
+        "extension" => None,
+        "def" | "fn" | "fun" | "func" | "function" => Some("function"),
+        "const" if item.indented => None,
+        "const" => Some("constant"),
+        // The family, not just "a type": Open Quickly badges a class C and a protocol Pr.
+        "actor" | "class" => Some("class"),
+        "struct" => Some("struct"),
+        "enum" => Some("enum"),
+        "interface" | "mixin" | "protocol" | "trait" => Some("protocol"),
+        _ => Some("type"),
+    }
 }
 
 fn is_identifier(value: &str) -> bool {
@@ -856,11 +967,15 @@ mod tests {
     }
 
     fn fixture() -> PathBuf {
+        // macOS clocks tick in microseconds, so two parallel tests can read the same time. The
+        // counter keeps their folders apart; one test's cleanup must never delete another's files.
+        static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
         let id = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let root = std::env::temp_dir().join(format!("panel-code-nav-{id}"));
+        let serial = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let root = std::env::temp_dir().join(format!("panel-code-nav-{id}-{serial}"));
         fs::create_dir_all(root.join("src")).unwrap();
         fs::write(root.join("src/token.ts"), "export class TokenStore {}\n").unwrap();
         fs::write(
@@ -921,6 +1036,42 @@ mod tests {
         let locations = symbol_locations(&root, &root.join("src/app.ts"), "AuthService").unwrap();
         assert_eq!(locations[0].path, "src/auth.ts");
         assert_eq!(locations[0].line, 2);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn swift_functions_are_definitions() {
+        let root = fixture();
+        fs::write(
+            root.join("src/Loader.swift"),
+            "struct Loader {\n    func reload(force: Bool) {}\n}\n",
+        )
+        .unwrap();
+        let locations = symbol_locations(&root, &root.join("src/app.ts"), "reload").unwrap();
+        assert_eq!(locations.len(), 1);
+        assert_eq!(locations[0].path, "src/Loader.swift");
+        assert_eq!(locations[0].line, 2);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn project_symbols_keep_declarations_and_drop_locals_and_prose() {
+        let root = fixture();
+        fs::write(
+            root.join("src/view.ts"),
+            "export const VIEW_LIMIT = 3;\nexport function paint() {\n  const local = 1;\n}\n",
+        )
+        .unwrap();
+        fs::write(root.join("README.md"), "The type system is simple.\n").unwrap();
+        fs::write(root.join("src/More.swift"), "extension String {}\n").unwrap();
+        let symbols = project_symbols(&root).unwrap();
+        let kind = |name: &str| symbols.iter().find(|item| item.name == name).map(|item| item.kind);
+        assert_eq!(kind("VIEW_LIMIT"), Some("constant"));
+        assert_eq!(kind("paint"), Some("function"));
+        assert_eq!(kind("SessionService"), Some("class"));
+        assert_eq!(kind("local"), None);
+        assert_eq!(kind("system"), None);
+        assert_eq!(kind("String"), None);
         fs::remove_dir_all(root).unwrap();
     }
 
