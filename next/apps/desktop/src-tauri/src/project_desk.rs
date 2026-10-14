@@ -138,13 +138,13 @@ fn documents(p: &Project) -> Result<Vec<Document>, String> {
         let root = ops.parent().unwrap_or(&ops);
         let keys: Vec<String> = crate::sprints::portfolio(&ops)
             .into_iter()
-            .filter(|(_, _, dir)| {
-                !dir.is_empty() && {
-                    let folder = root.join(dir);
+            .filter(|app| {
+                !app.dir.is_empty() && {
+                    let folder = root.join(&app.dir);
                     p.path == folder || p.path.starts_with(&folder)
                 }
             })
-            .map(|(key, _, _)| key)
+            .map(|app| app.key)
             .collect();
         // Frontmatter keys also cover aliases such as dream_commenter → hayrola.md.
         for area in ["apps", "work", "behavior", "sprints"] {

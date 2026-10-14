@@ -126,14 +126,38 @@ pub fn today() -> String {
 
 /* ------------------------------------------------------------ the portfolio */
 
-/// `portfolio.yaml` key → (name, dir). Hand-parsed: the file is hand-written YAML with two
-/// shapes, `key: { name: X, dir: Y, … }` on one line and `key:` with indented fields, and the two
-/// fields we need are the only ones read.
-pub(crate) fn portfolio(ops: &Path) -> Vec<(String, String, String)> {
+/// One `portfolio.yaml` row: the fields Panel reads. Everything else stays the CPO's.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub(crate) struct PortfolioApp {
+    pub key: String,
+    pub name: String,
+    /// Folder relative to the company root, the folder that holds `ops/`.
+    pub dir: String,
+    /// idea | building | review | releasing | live | paused | archived | unknown.
+    pub status: String,
+    pub notes: String,
+}
+
+impl PortfolioApp {
+    fn set(&mut self, field: &str, value: String) {
+        match field {
+            "name" => self.name = value,
+            "dir" => self.dir = value,
+            "status" => self.status = value,
+            "notes" => self.notes = value,
+            _ => {}
+        }
+    }
+}
+
+/// Every `portfolio.yaml` app. Hand-parsed: the file is hand-written YAML with two shapes,
+/// `key: { name: X, dir: Y, … }` on one line and `key:` with indented fields, and the fields in
+/// `PortfolioApp` are the only ones read.
+pub(crate) fn portfolio(ops: &Path) -> Vec<PortfolioApp> {
     let Ok(raw) = fs::read_to_string(ops.join("portfolio.yaml")) else {
         return Vec::new();
     };
-    let mut apps: Vec<(String, String, String)> = Vec::new();
+    let mut apps: Vec<PortfolioApp> = Vec::new();
     let mut in_apps = false;
     let mut current: Option<usize> = None;
     for line in raw.lines() {
@@ -154,35 +178,52 @@ pub(crate) fn portfolio(ops: &Path) -> Vec<(String, String, String)> {
             let Some((key, rest)) = trimmed.split_once(':') else {
                 continue;
             };
-            apps.push((key.trim().to_string(), String::new(), String::new()));
+            apps.push(PortfolioApp {
+                key: key.trim().to_string(),
+                ..PortfolioApp::default()
+            });
             current = Some(apps.len() - 1);
             let rest = rest.trim();
             if let Some(inline) = rest.strip_prefix('{') {
                 let at = apps.len() - 1;
-                for field in inline.trim_end_matches('}').split(',') {
-                    let Some((name, value)) = field.split_once(':') else {
-                        continue;
-                    };
-                    let value = strip_comment(value.trim()).trim_matches('"').to_string();
-                    match name.trim() {
-                        "name" => apps[at].1 = value,
-                        "dir" => apps[at].2 = value,
-                        _ => {}
-                    }
+                for (name, value) in inline_fields(inline.trim_end_matches('}')) {
+                    apps[at].set(&name, value);
                 }
             }
             continue;
         }
         if let (Some(at), Some((name, value))) = (current, trimmed.split_once(':')) {
             let value = strip_comment(value.trim()).trim_matches('"').to_string();
-            match name.trim() {
-                "name" => apps[at].1 = value,
-                "dir" => apps[at].2 = value,
-                _ => {}
-            }
+            apps[at].set(name.trim(), value);
         }
     }
     apps
+}
+
+/// `name: X, notes: "a, b", dir: Y` → pairs. A comma inside quotes belongs to the value.
+fn inline_fields(body: &str) -> Vec<(String, String)> {
+    let mut parts = Vec::new();
+    let mut part = String::new();
+    let mut quoted = false;
+    for ch in body.chars() {
+        match ch {
+            '"' => {
+                quoted = !quoted;
+                part.push(ch);
+            }
+            ',' if !quoted => parts.push(std::mem::take(&mut part)),
+            _ => part.push(ch),
+        }
+    }
+    parts.push(part);
+    parts
+        .into_iter()
+        .filter_map(|field| {
+            let (name, value) = field.split_once(':')?;
+            let value = strip_comment(value.trim()).trim_matches('"').to_string();
+            Some((name.trim().to_string(), value))
+        })
+        .collect()
 }
 
 fn strip_comment(value: &str) -> &str {
@@ -196,7 +237,7 @@ fn resolve_apps(ops: &Path) -> Vec<AppRef> {
     let projects = crate::projects::load();
     portfolio(ops)
         .into_iter()
-        .map(|(key, name, dir)| {
+        .map(|PortfolioApp { key, name, dir, .. }| {
             let project = if dir.is_empty() {
                 None
             } else {
@@ -769,16 +810,22 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         fs::write(
             dir.join("portfolio.yaml"),
-            "focus: []\n\napps:\n  notes_app:\n    name: Notes App\n    dir: apps/notes_app   # moved\n    kind: social\n\n  # --- Flutter apps ---\n  tavla:          { name: Tavla,              dir: Tavla,              kind: flutter-app, notes: \"a, b\" }\n  flame_server:   { name: Flame Appgea Server, dir: flame-appgea-server, kind: server }\n",
+            "focus: []\n\napps:\n  notes_app:\n    name: Notes App\n    dir: apps/notes_app   # moved\n    kind: social\n    status: live\n\n  # --- Flutter apps ---\n  tavla:          { name: Tavla,              dir: Tavla,              kind: flutter-app, status: review, notes: \"a, b\" }\n  flame_server:   { name: Flame Appgea Server, dir: flame-appgea-server, kind: server }\n",
         )
         .unwrap();
-        let apps = portfolio(&dir);
+        let apps: Vec<(String, String, String, String, String)> = portfolio(&dir)
+            .into_iter()
+            .map(|app| (app.key, app.name, app.dir, app.status, app.notes))
+            .collect();
+        let row = |key: &str, name: &str, dir: &str, status: &str, notes: &str| {
+            (key.into(), name.into(), dir.into(), status.into(), notes.into())
+        };
         assert_eq!(
             apps,
             vec![
-                ("notes_app".into(), "Notes App".into(), "apps/notes_app".into()),
-                ("tavla".into(), "Tavla".into(), "Tavla".into()),
-                ("flame_server".into(), "Flame Appgea Server".into(), "flame-appgea-server".into()),
+                row("notes_app", "Notes App", "apps/notes_app", "live", ""),
+                row("tavla", "Tavla", "Tavla", "review", "a, b"),
+                row("flame_server", "Flame Appgea Server", "flame-appgea-server", "", ""),
             ]
         );
         let _ = fs::remove_dir_all(dir);

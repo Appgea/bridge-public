@@ -836,6 +836,31 @@ export class TerminalDeck {
     }
   }
 
+  /** Paste file paths into a session's prompt without submitting, as a Finder drop would. */
+  pastePaths(sessionId: string, paths: string[]): boolean {
+    const pane = this.panes.get(sessionId);
+    if (!pane || pane.dead) return false;
+    this.typePaths(pane, paths);
+    return true;
+  }
+
+  /**
+   * The last non-empty lines on a session's screen, trailing whitespace trimmed. The sidebar
+   * card shows them beside a permission prompt, so an Allow is never given blind.
+   */
+  tail(sessionId: string, lines: number): string[] {
+    const pane = this.panes.get(sessionId);
+    if (!pane) return [];
+    const buffer = pane.term.buffer.active;
+    const out: string[] = [];
+    for (let at = buffer.baseY + pane.term.rows - 1; at >= 0 && out.length < lines; at -= 1) {
+      const text = buffer.getLine(at)?.translateToString(true) ?? "";
+      if (text.trim() || out.length) out.unshift(text);
+    }
+    while (out.length && !out[0].trim()) out.shift();
+    return out;
+  }
+
   /** Put the caret back in the terminal — the click that opened it should also let you type. */
   focus(): void {
     if (this.visible) this.panes.get(this.visible)?.term.focus();

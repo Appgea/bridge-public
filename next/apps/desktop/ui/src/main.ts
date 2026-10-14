@@ -12,6 +12,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { icon } from "./icons";
 import { withViewTransition } from "./motion";
 import { renderView } from "./registry";
@@ -55,9 +56,31 @@ import {
 import {
   KEYMAP_EVENT,
   type ActionId,
+  digitOf,
   label as chordLabel,
   matches as chordMatches,
 } from "./features/keymap";
+import { mountPulse } from "./features/pulse";
+import {
+  LANES,
+  STALE_AFTER,
+  age,
+  gitChip,
+  known,
+  laneOf,
+  parseQuery,
+  platformGroups,
+  rowLine,
+  sparkSvg,
+  splitNames,
+  urgent,
+  type Lane,
+  type Line,
+  type RowAction,
+  type RowFacts,
+} from "./features/rail";
+import { mountRailCard, type CardAction, type CardModel } from "./features/rail-card";
+import { nextMove } from "./features/next-move";
 import { mountRunner, type RunnerHandle, type RunnerProject } from "./features/runner";
 import { alertDialog, confirmDialog, promptDialog } from "./views/dialog";
 import { mountDashboard, type DashboardHandle } from "./features/dashboard";
@@ -134,6 +157,13 @@ type ProjectState = {
 
 const states = new Map<string, ProjectState>();
 let active: string | null = null;
+/** The sidebar's slow facts (git, commits, portfolio status, analytics) and its hover card. Up
+ *  here so every function below can read them from the first paint. */
+const pulse = mountPulse({
+  changed: () => paintProjectsSoon(),
+  analyticsInstalled: () => moduleInstalled("analytics"),
+});
+const railCard = mountRailCard();
 
 /** Sessions whose process has exited. They keep their transcript; they stop claiming to run. */
 const exited = new Set<string>();
@@ -1565,12 +1595,13 @@ async function loadProjectGit(id: string): Promise<void> {
  *   - the other orders (recent / A–Z) exist, but only because you asked for them by name, and even
  *     then the list freezes while the pointer is inside it — nothing moves under your hand.
  */
-type SortMode = "manual" | "recent" | "name";
-const SORT_LABEL: Record<SortMode, string> = { manual: "Manual", recent: "Recent", name: "A–Z" };
+type SortMode = "lanes" | "manual" | "recent" | "name";
+const SORT_LABEL: Record<SortMode, string> = { lanes: "Lanes", manual: "Manual", recent: "Recent", name: "A–Z" };
 const SORT_HINT: Record<SortMode, string> = {
+  lanes: "Order: lanes — grouped by what each project needs from you. Click for your manual order",
   manual: "Order: manual — drag rows to arrange, click to sort by recent",
   recent: "Order: most recently worked on — click to sort A–Z",
-  name: "Order: alphabetical — click to go back to your manual order",
+  name: "Order: alphabetical — click to go back to lanes",
 };
 
 function readStored<T>(key: string, fallback: T): T {
@@ -1584,7 +1615,7 @@ function readStored<T>(key: string, fallback: T): T {
 
 let sortMode: SortMode = ((): SortMode => {
   const saved = localStorage.getItem("panel-project-sort");
-  return saved === "recent" || saved === "name" ? saved : "manual";
+  return saved === "manual" || saved === "recent" || saved === "name" ? saved : "lanes";
 })();
 /* ------------------------------------------------------------------ the short rail
  * A portfolio of two dozen apps is a fact, not a menu. Painting all of it every second of the day
@@ -1601,6 +1632,15 @@ let manualOrder: string[] = readStored<string[]>("panel-project-order", []);
 const pinned = new Set<string>(readStored<string[]>("panel-project-pins", []));
 /** The live chip's state: show only projects with a running agent. Never sticky across sessions. */
 let liveOnly = false;
+/** Lanes fold the Quiet lane until you open it. The choice sticks. */
+let quietOpen = localStorage.getItem("panel-rail-quiet") === "1";
+/** Folded platform rows: guest id → host id, and host id → every member, host first. */
+const hostOf = new Map<string, string>();
+let membersOf = new Map<string, string[]>();
+/** Each project's newest agent report, from the chat archive. */
+const lastReport = new Map<string, { id: string; title: string; at: number }>();
+/** Unseen review batches per project. */
+let reviewCounts = new Map<string, number>();
 /** The ids in the order last painted. Used to hold the list still while the pointer is inside. */
 let paintedOrder: string[] = [];
 let listHot = false;
@@ -1618,7 +1658,11 @@ function saveOrder(): void {
  *  enough to fit anyway all mean there is nothing to collapse. */
 function railCollapsed(): boolean {
   return (
-    !showAllProjects && !liveOnly && !projectFilter.value.trim() && states.size > RECENT_ROWS
+    sortMode !== "lanes" &&
+    !showAllProjects &&
+    !liveOnly &&
+    !projectFilter.value.trim() &&
+    states.size > RECENT_ROWS
   );
 }
 
@@ -1651,7 +1695,7 @@ function orderProjects(): ProjectState[] {
     (here.project.role === "collection" && children(here.project.id).some((child) => pinned.has(child.project.id)));
   // Frozen: the pointer is in the list (or a drag is live) and the rule is one that can move rows.
   // Keep exactly what is on screen; the new order lands the moment the pointer leaves.
-  if ((listHot || dragging) && mode === "recent" && paintedOrder.length) {
+  if ((listHot || dragging) && (mode === "recent" || mode === "lanes") && paintedOrder.length) {
     const held = (here: ProjectState): number => {
       const at = paintedOrder.indexOf(here.project.id);
       return at === -1 ? paintedOrder.length + slot(here) : at;
@@ -1663,7 +1707,7 @@ function orderProjects(): ProjectState[] {
       Number(isPinned(b)) - Number(isPinned(a)) ||
       (mode === "name"
         ? a.project.name.localeCompare(b.project.name)
-        : mode === "recent"
+        : mode === "recent" || mode === "lanes"
           ? recent(b) - recent(a) || slot(a) - slot(b)
           : slot(a) - slot(b)),
   );
@@ -1820,6 +1864,378 @@ function openRowMenu(here: ProjectState, at: { x: number; y: number }): void {
   rowMenu.querySelector<HTMLButtonElement>(".row-menu-item")?.focus();
 }
 
+/* ------------------------------------------------------------------ the rail's facts
+ * Everything a row says beyond its name comes from here: the pulse (git, commits, portfolio
+ * status, analytics), the attention state, the review queue and the last report. The rules live
+ * in features/rail.ts; these functions only gather the facts for them.
+ */
+
+/** The rows a platform pair folds into one: the host first. A plain project is its own list. */
+function membersFor(here: ProjectState): ProjectState[] {
+  const ids = membersOf.get(here.project.id) ?? [here.project.id];
+  return ids.map((id) => state(id)).filter((member): member is ProjectState => Boolean(member));
+}
+
+function unitAttention(members: ProjectState[]): "needs" | "done" | null {
+  const all = members.map(attentionOf);
+  return all.includes("needs") ? "needs" : all.includes("done") ? "done" : null;
+}
+
+/** Pinned, or a collection or a folded row with a pinned member. */
+function pinnedUnit(here: ProjectState): boolean {
+  if (membersFor(here).some((member) => pinned.has(member.project.id))) return true;
+  return (
+    here.project.role === "collection" &&
+    [...states.values()].some((child) => child.project.parent_id === here.project.id && pinned.has(child.project.id))
+  );
+}
+
+/** Newest sign of life: a visit, an agent turn, a commit, or a report. */
+function touchedAt(here: ProjectState): number {
+  const commit = (pulse.peekActivity(here.project.id)?.last_commit ?? 0) * 1000;
+  return Math.max(here.lastActive, commit, lastReport.get(here.project.id)?.at ?? 0);
+}
+
+function factsOf(here: ProjectState): RowFacts {
+  return {
+    exists: here.project.exists,
+    attention: attentionOf(here),
+    running: here.running,
+    reviews: reviewCounts.get(here.project.id) ?? 0,
+    standing: pulse.standing(here.project.id),
+    verdict: pulse.verdict(here.project.id),
+    touched: touchedAt(here),
+  };
+}
+
+/** A collection sits where its busiest child does, a folded row where its busiest member does. */
+function unitLane(here: ProjectState): Lane {
+  const members =
+    here.project.role === "collection"
+      ? [...states.values()].filter((child) => child.project.parent_id === here.project.id)
+      : membersFor(here);
+  return members.map((member) => laneOf(factsOf(member))).reduce(urgent, "quiet" as Lane);
+}
+
+/** The member whose state the row's line should speak for: parked, finished, working, else host. */
+function leadMember(members: ProjectState[]): ProjectState {
+  return (
+    members.find((member) => attentionOf(member) === "needs") ??
+    members.find((member) => attentionOf(member) === "done") ??
+    members.find((member) => member.running) ??
+    members[0]
+  );
+}
+
+function lineInput(here: ProjectState): Parameters<typeof rowLine>[0] {
+  const id = here.project.id;
+  const git = pulse.peekGit(id);
+  const report = lastReport.get(id) ?? null;
+  return {
+    ...factsOf(here),
+    ask: askTray.headline(id),
+    status: here.status,
+    move: nextMove({ exists: here.project.exists, work: 0, running: false, git }).short,
+    report,
+  };
+}
+
+/** A lane's header. Quiet's is a button: it folds the lane away and brings it back. */
+function laneHead(section: string, count: number): HTMLElement {
+  const lane = LANES.find((entry) => entry.id === section);
+  const label = section === "pinned" ? "Pinned" : lane?.label ?? section;
+  if (section !== "quiet") {
+    const head = document.createElement("div");
+    head.className = "project-group lane-head";
+    head.dataset.lane = section;
+    head.title = lane?.hint ?? "Your pins, in your order";
+    head.innerHTML = `<span></span><i></i>`;
+    head.querySelector("span")!.textContent = label;
+    head.querySelector("i")!.textContent = String(count);
+    return head;
+  }
+  const head = document.createElement("button");
+  head.type = "button";
+  head.className = "project-group lane-head is-toggle";
+  head.dataset.lane = section;
+  head.setAttribute("aria-expanded", String(quietOpen));
+  head.title = quietOpen ? "Fold the quiet projects away" : (lane?.hint ?? "");
+  head.innerHTML = `<span></span><i></i><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m7 10 5 5 5-5"/></svg>`;
+  head.querySelector("span")!.textContent = label;
+  head.querySelector("i")!.textContent = String(count);
+  head.addEventListener("click", () => {
+    quietOpen = !quietOpen;
+    localStorage.setItem("panel-rail-quiet", quietOpen ? "1" : "0");
+    listHot = false;
+    paintProjects();
+  });
+  return head;
+}
+
+/** One pill per platform, each with its own state dot. A click opens that member. */
+function platformPills(members: ProjectState[], labels: string[]): HTMLElement {
+  const pills = document.createElement("span");
+  pills.className = "project-pills";
+  members.forEach((member, at) => {
+    const pill = document.createElement("button");
+    pill.type = "button";
+    pill.tabIndex = -1;
+    pill.className = "project-pill";
+    const attention = attentionOf(member);
+    pill.classList.toggle("is-asking", attention === "needs");
+    pill.classList.toggle("is-done", attention === "done");
+    pill.classList.toggle("is-running", member.running);
+    pill.classList.toggle("is-on", member.project.id === active && !terminalsActive);
+    pill.innerHTML = `<i></i><span></span>`;
+    pill.querySelector("span")!.textContent = labels[at] || member.project.name;
+    pill.title = `Open ${member.project.name}`;
+    pill.addEventListener("click", (event) => {
+      event.stopPropagation();
+      void select(member.project.id);
+    });
+    pills.append(pill);
+  });
+  return pills;
+}
+
+/** The marks around the name: the corner badge, the git chip, the activity bars, the quick button. */
+function decorateRow(
+  row: HTMLElement,
+  here: ProjectState,
+  members: ProjectState[],
+  attention: "needs" | "done" | null,
+): void {
+  if (here.project.role !== "leaf") return;
+  const lead = leadMember(members);
+  const id = lead.project.id;
+  const meta = row.querySelector<HTMLElement>(".project-meta")!;
+  const touched = Math.max(...members.map(touchedAt));
+  row.classList.toggle("is-stale", touched > 0 && Date.now() - touched > STALE_AFTER && !attention);
+
+  // One corner badge, the loudest signal wins. The title lists them all.
+  const reviews = members.reduce((sum, member) => sum + (reviewCounts.get(member.project.id) ?? 0), 0);
+  const verdict = members.map((member) => pulse.verdict(member.project.id)).find((v) => v?.risk) ?? null;
+  const signals: string[] = [];
+  if (!here.project.exists) signals.push("Folder missing");
+  if (verdict) signals.push(`Analytics: ${verdict.label || verdict.call}`);
+  if (reviews) signals.push(`${reviews} waiting for review`);
+  if (signals.length) {
+    const badge = document.createElement("i");
+    badge.className = `project-badge ${!here.project.exists || verdict ? "t-risk" : "t-review"}`;
+    badge.textContent = !here.project.exists ? "!" : verdict ? "↓" : String(Math.min(reviews, 9));
+    badge.title = signals.join(" · ");
+    row.querySelector(".project-icon")!.append(badge);
+  }
+
+  if (attention) {
+    const quick = document.createElement("button");
+    quick.type = "button";
+    quick.className = `project-quick t-${attention === "needs" ? "warn" : "ok"}`;
+    quick.textContent = attention === "needs" ? "Answer" : "Diff";
+    quick.title =
+      attention === "needs"
+        ? "See what the agent is asking, and answer it here"
+        : "Open the files this turn changed";
+    quick.addEventListener("click", (event) => {
+      event.stopPropagation();
+      if (attention === "needs") railCard.pin(row, () => cardModel(lead));
+      else void select(id, "files");
+    });
+    meta.append(quick);
+  } else {
+    const chip = gitChip(pulse.peekGit(id));
+    if (chip) {
+      const node = document.createElement("span");
+      node.className = `project-chip${chip.warn ? " is-warn" : ""}`;
+      node.textContent = chip.text;
+      node.title = chip.title;
+      meta.append(node);
+    }
+  }
+  const spark = sparkSvg(pulse.peekActivity(id));
+  if (spark) meta.insertAdjacentHTML("beforeend", spark);
+}
+
+/** The first row a filter found answers Enter, with the action word if one was typed. */
+function markTarget(action: RowAction | null): void {
+  const row = [...projectList.querySelectorAll<HTMLElement>(".project-row")].find(
+    (candidate) => !candidate.classList.contains("is-collection"),
+  );
+  if (!row) return;
+  row.classList.add("is-target");
+  const hint = document.createElement("kbd");
+  hint.className = "project-enter";
+  hint.textContent = `↵ ${action ?? "open"}`;
+  row.querySelector(".project-meta")?.prepend(hint);
+}
+
+/** Open a project and do one thing there. The filter's action words and the card share this. */
+async function runRowAction(id: string, action: RowAction | null): Promise<void> {
+  switch (action) {
+    case "claude":
+    case "shell": {
+      await select(id);
+      const live = action === "claude" ? reviewAgent(id) : null;
+      if (live) jumpToSession(id, live.id);
+      else await openSession(action);
+      return;
+    }
+    case "run":
+      await select(id);
+      void runner.startProject(id, false);
+      return;
+    case "release":
+      await select(id, "release");
+      return;
+    case "git":
+      await select(id, "git");
+      return;
+    case "work":
+      await select(id, "files");
+      return;
+    case "review":
+      showReview();
+      return;
+    default:
+      await select(id);
+  }
+}
+
+/** The card for one project: everything the row has no room for, plus the doors. */
+function cardModel(here: ProjectState): CardModel {
+  const id = here.project.id;
+  const facts = factsOf(here);
+  const lane = laneOf(facts);
+  const laneEntry = LANES.find((entry) => entry.id === lane)!;
+  const git = pulse.peekGit(id);
+  const chip = gitChip(git);
+  const activity = pulse.peekActivity(id);
+  const standing = facts.standing;
+  const move = nextMove({ exists: here.project.exists, work: 0, running: here.running, git });
+  const report = lastReport.get(id);
+  const live = reviewAgent(id);
+
+  let ask: CardModel["ask"] = null;
+  const parked = here.sessions.find((session) => sessionPhase.get(session.id) === "ask");
+  if (parked) {
+    const open: CardAction = { label: "Open terminal", run: () => jumpToSession(id, parked.id) };
+    if (askTray.sessionAsking(parked.id)) {
+      ask = { headline: askTray.headline(id) ?? "The agent asked a question", screen: [], actions: [{ ...open, label: "Answer", primary: true }] };
+    } else {
+      // A terminal permission prompt. Enter takes the highlighted choice and Esc refuses, the
+      // same keys the terminal itself answers to. Only Claude's prompt is known to work that way.
+      const answerable = parked.kind === "claude";
+      const send = (data: string) => async () => {
+        await invoke("write_terminal", { terminalId: parked.terminal_id, data });
+        endPermissionWait(id, parked.id);
+        paintProjectsSoon();
+      };
+      ask = {
+        headline: "Permission prompt",
+        screen: deck.tail(parked.id, 14),
+        actions: answerable
+          ? [
+              { label: "Allow", run: () => void send("\r")(), primary: true },
+              { label: "Deny", run: () => void send("\x1b")(), danger: true },
+              open,
+            ]
+          : [open],
+      };
+    }
+  }
+
+  const actions: CardAction[] = [];
+  if (attentionOf(here) === "done") actions.push({ label: "Open diff", run: () => void select(id, "files"), primary: true });
+  if (facts.reviews) actions.push({ label: `Review ${facts.reviews}`, run: () => showReview(), primary: !actions.length });
+  actions.push(
+    live
+      ? { label: "Open agent", run: () => void runRowAction(id, "claude"), primary: !actions.length }
+      : { label: "Start Claude", run: () => void runRowAction(id, "claude"), primary: !actions.length },
+  );
+  actions.push({ label: "Run app", run: () => void runRowAction(id, "run") });
+  if (here.modules.has("release")) actions.push({ label: "Release", run: () => void runRowAction(id, "release") });
+  if (move.door === "git") actions.push({ label: "Git", run: () => void runRowAction(id, "git") });
+
+  const commits = activity?.days.reduce((sum, count) => sum + count, 0) ?? 0;
+  const last = activity?.last_commit ? `last ${age(activity.last_commit * 1000)} ago` : "no commits";
+  const signals: string[] = [];
+  const verdict = facts.verdict;
+  if (verdict) {
+    const trend = verdict.trend === null ? "" : ` · ${Math.round(verdict.trend * 100)}% week on week`;
+    signals.push(`${verdict.label || verdict.call} (${verdict.call})${trend}`);
+  }
+  if (!here.project.exists) signals.push("The folder is missing");
+
+  return {
+    name: here.project.name,
+    lane: laneEntry.label,
+    laneTone: lane === "needs" ? "warn" : lane === "working" ? "live" : lane === "shipping" ? "ok" : "mute",
+    status: known(standing?.status),
+    notes: standing?.notes ?? "",
+    move: move.short || move.door ? { title: move.title, detail: move.detail } : null,
+    report: report
+      ? { title: report.title, age: age(report.at), open: () => chat.reveal(report.id) }
+      : null,
+    git: git?.is_repo ? [git.branch, chip?.title || "clean"].filter(Boolean).join(" · ") : "",
+    activity: activity ? { spark: sparkSvg(activity), caption: `${commits} commits in 14 days · ${last}` } : null,
+    signals,
+    ask,
+    actions,
+  };
+}
+
+/** Pins first, in rail order, then every other row as painted. ⌃1…⌃9 walk this list. */
+function jumpTargets(): string[] {
+  const rows = [...projectList.querySelectorAll<HTMLElement>(".project-row")];
+  const ids = (list: HTMLElement[]) => list.map((row) => row.dataset.projectId!).filter(Boolean);
+  return [...ids(rows.filter((row) => row.classList.contains("is-pinned"))), ...ids(rows.filter((row) => !row.classList.contains("is-pinned")))];
+}
+
+/**
+ * Files dropped on a row go to that project's agent: pasted into its prompt, not submitted, so
+ * you add the instruction. No agent running starts one first.
+ */
+async function dropOnProject(id: string, paths: string[]): Promise<void> {
+  const here = state(id);
+  if (!here || here.project.role !== "leaf" || !paths.length) return;
+  let session = reviewAgent(id);
+  const fresh = !session;
+  if (!session) session = await openSessionFor(id, "claude");
+  if (!session) {
+    await alertDialog(`Could not start an agent for ${here.project.name}.\n\n${lastStartError}`);
+    return;
+  }
+  await select(id);
+  jumpToSession(id, session.id);
+  // A brand-new agent draws its prompt after a moment. Typing into it sooner is typing into nothing.
+  if (fresh) await new Promise((resolve) => window.setTimeout(resolve, 1500));
+  deck.pastePaths(session.id, paths);
+}
+
+/** Which project row a physical-pixel window point is over, for a Finder drop. */
+function rowAtPoint(x: number, y: number): HTMLElement | null {
+  const ratio = window.devicePixelRatio || 1;
+  const row = document.elementFromPoint(x / ratio, y / ratio)?.closest<HTMLElement>(".project-row");
+  return row && !row.classList.contains("is-collection") ? row : null;
+}
+
+function paintRowDrop(row: HTMLElement | null): void {
+  for (const candidate of projectList.querySelectorAll(".project-row.is-drop")) {
+    if (candidate !== row) candidate.classList.remove("is-drop");
+  }
+  row?.classList.add("is-drop");
+}
+
+/** Display name → project id, any case, for boards that name apps rather than folders. */
+function projectNames(): Map<string, string> {
+  const names = new Map<string, string>();
+  for (const here of states.values()) {
+    names.set(here.project.name, here.project.id);
+    names.set(here.project.name.toLowerCase(), here.project.id);
+  }
+  return names;
+}
+
 function paintProjects(): void {
   // A direct paint answers any batched one that is still waiting.
   if (paintSoonTimer) {
@@ -1840,7 +2256,11 @@ function paintProjects(): void {
       if (rowId) before.set(rowId, child.getBoundingClientRect().top);
     }
   }
-  const query = projectFilter.value.trim().toLocaleLowerCase();
+  const { query, action: queryAction } = parseQuery(projectFilter.value);
+  // Platform pairs fold into their host's row, so the row is listed when any member matches.
+  membersOf = platformGroups([...states.values()].map((here) => here.project));
+  hostOf.clear();
+  for (const [host, members] of membersOf) for (const id of members) if (id !== host) hostOf.set(id, host);
   // The live chip drops itself when the work stops, and it decides whether the rail is collapsed —
   // so it has to settle BEFORE the order is asked for, not after.
   const liveCount = [...states.values()].filter((here) => here.running).length;
@@ -1848,13 +2268,19 @@ function paintProjects(): void {
   const collapsed = railCollapsed();
   const allProjects = orderProjects();
   paintedOrder = allProjects.map((here) => here.project.id);
+  const hits = (here: ProjectState): boolean =>
+    (!liveOnly || here.running) &&
+    (!query ||
+      [
+        here.project.name,
+        here.project.path,
+        here.status,
+        here.detail,
+        pulse.standing(here.project.id)?.status ?? "",
+        groupName(here.project.group),
+      ].some((value) => value.toLocaleLowerCase().includes(query)));
   const matching = allProjects.filter(
-    (here) =>
-      (!liveOnly || here.running) &&
-      (!query ||
-        [here.project.name, here.project.path, here.status, here.detail].some((value) =>
-          value.toLocaleLowerCase().includes(query),
-        )),
+    (here) => !hostOf.has(here.project.id) && membersFor(here).some(hits),
   );
   // Collapsed, the rail keeps RECENT_ROWS rows — but never at the cost of hiding a pin (a deliberate
   // or the project you are standing in (which may be one you have not worked in yet today).
@@ -1875,6 +2301,38 @@ function paintProjects(): void {
   }
   const visibleProjects = collapsed ? matching.filter((here) => shown.has(here.project.id)) : matching;
   const narrowed = Boolean(query) || liveOnly;
+  /*
+   * Lanes. Every top-level row takes the lane of its busiest member, children ride with their
+   * parent, pins lead in a section of their own, and Quiet folds unless you opened it or a filter
+   * is doing the narrowing. A filter that hides matches would be lying.
+   */
+  const laneMode = activeSort() === "lanes";
+  const topOf = (here: ProjectState): ProjectState =>
+    here.project.parent_id ? state(here.project.parent_id) ?? here : here;
+  const sectionOf = new Map<string, string>();
+  const sectionCounts = new Map<string, number>();
+  let quietFolded = 0;
+  if (laneMode) {
+    for (const here of visibleProjects) {
+      const top = topOf(here);
+      if (sectionOf.has(top.project.id)) continue;
+      const key = pinnedUnit(top) ? "pinned" : unitLane(top);
+      sectionOf.set(top.project.id, key);
+      sectionCounts.set(key, (sectionCounts.get(key) ?? 0) + 1);
+    }
+    const order = ["pinned", ...LANES.map((lane) => lane.id)];
+    const rank = (here: ProjectState): number => order.indexOf(sectionOf.get(topOf(here).project.id) ?? "quiet");
+    visibleProjects.sort((a, b) => rank(a) - rank(b));
+    if (!quietOpen && !narrowed) {
+      const keep = visibleProjects.filter(
+        (here) =>
+          sectionOf.get(topOf(here).project.id) !== "quiet" ||
+          membersFor(topOf(here)).some((member) => member.project.id === active),
+      );
+      quietFolded = visibleProjects.length - keep.length;
+      visibleProjects.splice(0, visibleProjects.length, ...keep);
+    }
+  }
   // Counts are projects, never rows: a collection is a folder in this list, not a project, and
   // Home counts the same way. Two numbers for one portfolio read as a bug.
   const leaves = (list: typeof allProjects): number =>
@@ -1895,7 +2353,7 @@ function paintProjects(): void {
   // The one door between the short rail and the whole portfolio. It only appears when there is
   // something behind it, and it stays put while a filter is doing the narrowing.
   const hiddenCount = projectTotal - leaves(visibleProjects);
-  projectShowAll.hidden = narrowed || (!collapsed && states.size <= RECENT_ROWS);
+  projectShowAll.hidden = laneMode || narrowed || (!collapsed && states.size <= RECENT_ROWS);
   projectShowAll.classList.toggle("is-open", !collapsed);
   projectShowAll.querySelector("b")!.textContent = collapsed
     ? `Show all ${projectTotal}`
@@ -1920,7 +2378,7 @@ function paintProjects(): void {
    */
   const groupOrder = new Map(groups.map((group, at) => [group.id, at]));
   const groupsOnScreen = new Set(visibleProjects.map((here) => here.project.group || ""));
-  const sectioned = groupsOnScreen.size > 1;
+  const sectioned = !laneMode && groupsOnScreen.size > 1;
   if (sectioned) {
     const rank = (id: string): number => groupOrder.get(id) ?? (id ? 500 : 999);
     // A stable sort by group rank keeps every within-group order exactly as it was computed.
@@ -1940,6 +2398,11 @@ function paintProjects(): void {
   projectList.replaceChildren(
     ...visibleProjects.flatMap((here, index) => {
       const nodes: HTMLElement[] = [];
+      const section = sectionOf.get(topOf(here).project.id);
+      if (laneMode && section && section !== openSection) {
+        openSection = section;
+        nodes.push(laneHead(section, sectionCounts.get(section) ?? 0));
+      }
       if (sectioned && here.project.group !== openSection) {
         openSection = here.project.group;
         const head = document.createElement("div");
@@ -1964,17 +2427,20 @@ function paintProjects(): void {
       }
       // While a portfolio screen is up, no project is "where you are" — even though `active`
       // still remembers the last one for a cheap return.
-      row.classList.toggle("is-active", here.project.id === active && !terminalsActive);
+      const members = membersFor(here);
+      row.classList.toggle(
+        "is-active",
+        members.some((member) => member.project.id === active) && !terminalsActive,
+      );
       if (row.classList.contains("is-active")) row.setAttribute("aria-current", "page");
       row.classList.toggle("is-missing", !here.project.exists);
 
-      const attention = attentionOf(here);
+      const attention = unitAttention(members);
+      const running = members.some((member) => member.running);
       row.classList.toggle("is-asking", attention === "needs");
       row.classList.toggle("is-done", attention === "done");
-      const mark =
-        attention === "needs" ? "needs you" : attention === "done" ? "your turn" : here.running ? here.status : "idle";
-      row.innerHTML = `<span class="project-icon"><span class="project-glyph"></span><i class="dot"></i></span><b></b><small></small><span class="project-tools"><button class="project-pin" type="button" tabindex="-1"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l-1 6 4 3v2H6v-2l4-3Z"/><path d="M12 14v7"/></svg></button><button class="project-more" type="button" tabindex="-1"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg></button></span>`;
-      row.classList.toggle("is-running", here.running);
+      row.classList.toggle("is-running", running);
+      row.innerHTML = `<span class="project-icon"><span class="project-glyph"></span><i class="dot"></i></span><span class="project-label"><b></b></span><small></small><span class="project-meta"></span><span class="project-tools"><button class="project-pin" type="button" tabindex="-1"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 3h6l-1 6 4 3v2H6v-2l4-3Z"/><path d="M12 14v7"/></svg></button><button class="project-more" type="button" tabindex="-1"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="5" cy="12" r="1.7"/><circle cx="12" cy="12" r="1.7"/><circle cx="19" cy="12" r="1.7"/></svg></button></span>`;
       row.querySelector(".project-glyph")!.textContent = here.project.name.trim().charAt(0).toUpperCase();
       const icon = document.createElement("img");
       icon.src = `project-icon://panel/${encodeURIComponent(here.project.id)}`;
@@ -1982,11 +2448,21 @@ function paintProjects(): void {
       icon.draggable = false;
       icon.addEventListener("error", () => icon.remove());
       row.querySelector(".project-icon")!.prepend(icon);
-      row.querySelector("b")!.textContent = here.project.name;
-      row.querySelector("small")!.textContent =
+      const names = splitNames(members.map((member) => member.project.name));
+      row.querySelector("b")!.textContent = members.length > 1 ? names.base : here.project.name;
+      if (members.length > 1) row.querySelector(".project-label")!.append(platformPills(members, names.pills));
+      const line: Line =
         here.project.role === "collection"
-          ? `${[...states.values()].filter((child) => child.project.parent_id === here.project.id).length} projects`
-          : mark;
+          ? {
+              text: `${[...states.values()].filter((child) => child.project.parent_id === here.project.id).length} projects`,
+              tone: "",
+            }
+          : rowLine(lineInput(leadMember(members)));
+      const small = row.querySelector("small")!;
+      small.textContent = line.text;
+      if (line.tone) small.classList.add(`t-${line.tone}`);
+      const mark = line.text;
+      decorateRow(row, here, members, attention);
       // The name survives collapse: the compact rail shows icons only, so it rides on hover.
       row.title = attention ? `${here.project.name} — ${mark}` : here.project.name;
       const pin = row.querySelector<HTMLButtonElement>(".project-pin")!;
@@ -2027,11 +2503,24 @@ function paintProjects(): void {
         event.preventDefault();
         void select(here.project.id);
       });
-      row.addEventListener("pointerdown", (event) => beginRowDrag(event, row, canDrag));
+      row.addEventListener("pointerdown", (event) => {
+        railCard.hide();
+        beginRowDrag(event, row, canDrag);
+      });
+      row.addEventListener("pointerenter", () => {
+        if (!dragging && here.project.role === "leaf") railCard.hover(row, () => cardModel(here));
+      });
+      row.addEventListener("pointerleave", () => railCard.leave());
       nodes.push(row);
       return nodes;
     }),
   );
+  if (laneMode && quietFolded > 0) projectList.append(laneHead("quiet", sectionCounts.get("quiet") ?? 0));
+  railCard.repainted((id) =>
+    projectList.querySelector<HTMLElement>(`.project-row[data-project-id="${CSS.escape(id)}"]`),
+  );
+  if (query) markTarget(queryAction);
+  pulse.warm([...states.values()].filter((here) => here.project.role === "leaf").map((here) => here.project.id));
   if (narrowed && visibleProjects.length === 0) {
     const empty = document.createElement("div");
     empty.className = "project-filter-empty";
@@ -2091,7 +2580,7 @@ let suppressRowClick = false;
  *  reorder among pins, the rest among themselves — so the seam is a wall you can feel. */
 function beginRowDrag(event: PointerEvent, row: HTMLElement, canDrag: boolean): void {
   if (!canDrag || event.button !== 0) return;
-  if ((event.target as HTMLElement).closest(".project-tools")) return;
+  if ((event.target as HTMLElement).closest(".project-tools, .project-meta, .project-pills")) return;
   const rows = [...projectList.querySelectorAll<HTMLElement>(".project-row")];
   const start = rows.indexOf(row);
   if (start === -1) return;
@@ -2905,6 +3394,10 @@ async function boot(): Promise<void> {
       return target ? deck.sendPrompt(target.id, text) : false;
     },
     busy: () => reviewActive || isLightboxOpen() || Boolean(document.querySelector(".rd-veil")),
+    onProjects(counts) {
+      reviewCounts = counts;
+      paintProjectsSoon();
+    },
     onCount(unseen) {
       const badge = el("reviewBadge");
       badge.textContent = unseen > 99 ? "99+" : String(unseen);
@@ -2933,7 +3426,8 @@ async function boot(): Promise<void> {
   home = mountHome(el("homeScreen"), {
     openProject: (id, start) => openProjectFromHome(id, start),
     isExited: (sessionId) => exited.has(sessionId),
-    projectGit: (id) => invoke<GitState>("project_dashboard", { project: id }),
+    projectGit: (id) =>
+      pulse.git(id).then((git) => git ?? Promise.reject(new Error("no git snapshot"))),
     // Home lists what was said; Chat is where it is read and answered. Clicking a line opens
     // Chat on that post — Esc brings Home straight back.
     openPost: (postId) => chat.reveal(postId),
@@ -2985,6 +3479,16 @@ async function boot(): Promise<void> {
       home.unread(counts);
     },
     archive: (posts) => {
+      for (const post of posts) {
+        const known = lastReport.get(post.project);
+        if (known && known.at >= post.at) continue;
+        lastReport.set(post.project, {
+          id: post.id,
+          title: str(post.payload.title, str(post.payload.outcome, "Report")),
+          at: post.at,
+        });
+      }
+      paintProjectsSoon();
       home.activity(
         posts.map((post) => ({
           id: post.id,
@@ -3467,6 +3971,7 @@ async function boot(): Promise<void> {
   groups = await invoke<Group[]>("list_groups").catch(() => []);
   const list = await invoke<Project[]>("list_projects");
   for (const project of list) states.set(project.id, makeState(project));
+  pulse.refreshPortfolio(projectNames());
   await restoreWall();
   paintProjects();
   // The portfolio lands on Home. Only a Panel scoped to ONE project skips it — there is no
@@ -3491,6 +3996,38 @@ async function boot(): Promise<void> {
   for (const entry of TABS) {
     if (!entry.extension) el(entry.button).addEventListener("click", () => setTab(entry.tab));
   }
+
+  // ⌃1…⌃9 open a project from the sidebar: pins first, then rows in the order you see them.
+  window.addEventListener(
+    "keydown",
+    (event) => {
+      if (isRecording() || isLightboxOpen() || event.repeat) return;
+      if (!chordMatches(event, "project.jump")) return;
+      const digit = digitOf(event);
+      const id = digit ? jumpTargets()[digit - 1] : undefined;
+      if (!id) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      void select(id);
+    },
+    true,
+  );
+
+  // Files dropped from Finder onto a project row go to that project's agent. Tauri hands drops
+  // over before the webview sees them, so this listens beside the terminal's own drop handler.
+  void getCurrentWebview().onDragDropEvent(({ payload }) => {
+    if (payload.type === "leave") {
+      paintRowDrop(null);
+      return;
+    }
+    const row = rowAtPoint(payload.position.x, payload.position.y);
+    if (payload.type !== "drop") {
+      paintRowDrop(row);
+      return;
+    }
+    paintRowDrop(null);
+    if (row?.dataset.projectId) void dropOnProject(row.dataset.projectId, payload.paths);
+  });
 
   // F5 is the debugger's one global door. It opens the project screen first, then starts the
   // selected profile. A live session treats the second press as a no-op instead of duplicating.
@@ -3580,7 +4117,7 @@ async function boot(): Promise<void> {
   });
   projectList.addEventListener("pointerleave", () => {
     listHot = false;
-    if (repaintQueued || activeSort() === "recent") paintProjects();
+    if (repaintQueued || activeSort() === "recent" || activeSort() === "lanes") paintProjects();
   });
   projectList.addEventListener("focusin", () => {
     listHot = true;
@@ -3588,13 +4125,14 @@ async function boot(): Promise<void> {
   projectList.addEventListener("focusout", () => {
     if (projectList.matches(":hover")) return;
     listHot = false;
-    if (repaintQueued || activeSort() === "recent") paintProjects();
+    if (repaintQueued || activeSort() === "recent" || activeSort() === "lanes") paintProjects();
   });
 
   // One chip, one rule. Manual is the default and the only one that can be dragged; the other two
   // exist because sometimes you want the machine's answer, and then you asked for it out loud.
   projectSort.addEventListener("click", () => {
-    sortMode = sortMode === "manual" ? "recent" : sortMode === "recent" ? "name" : "manual";
+    sortMode =
+      sortMode === "lanes" ? "manual" : sortMode === "manual" ? "recent" : sortMode === "recent" ? "name" : "lanes";
     saveOrder();
     listHot = false;
     paintProjects();
@@ -3620,6 +4158,17 @@ async function boot(): Promise<void> {
 
   projectFilter.addEventListener("input", paintProjects);
   projectFilter.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      const target = projectList.querySelector<HTMLElement>(".project-row.is-target");
+      if (!target?.dataset.projectId) return;
+      event.preventDefault();
+      const { action } = parseQuery(projectFilter.value);
+      projectFilter.value = "";
+      projectFilter.blur();
+      paintProjects();
+      void runRowAction(target.dataset.projectId, action);
+      return;
+    }
     if (event.key === "Escape" && (projectFilter.value || liveOnly)) {
       projectFilter.value = "";
       liveOnly = false;
@@ -3834,6 +4383,7 @@ async function refreshPortfolio(): Promise<void> {
     // The open project is never yanked out from under the human, even if the file dropped it.
     if (!live.has(id) && id !== active) states.delete(id);
   }
+  pulse.refreshPortfolio(projectNames());
   paintProjects();
 }
 

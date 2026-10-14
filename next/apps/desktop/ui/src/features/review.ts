@@ -33,6 +33,8 @@ export type ReviewEvents = {
   openProject(id: string): void;
   /** Batches with something unseen: a batch is one piece of work, however many files it wrote. */
   onCount(unseen: number): void;
+  /** The same, per project, for the sidebar rows. */
+  onProjects(counts: Map<string, number>): void;
   /** The agent a review's feedback goes to, by display name, or null when none is open. */
   agentName(project: string): string | null;
   /** Type the feedback into that agent's prompt and submit it. */
@@ -111,7 +113,20 @@ export function mountReview(screen: HTMLElement, events: ReviewEvents): ReviewHa
       // Storage full or blocked: the queue still works for this run.
     }
   };
-  const announce = (): void => events.onCount(batches().filter((batch) => batch.some((item) => !item.seen)).length);
+  // Above announce(): it runs during mount, and a saved queue reaches folderOf through batches().
+  const relative = (item: Item): string => {
+    const root = events.projectPath(item.project);
+    return root && item.path.startsWith(`${root}/`) ? item.path.slice(root.length + 1) : item.path;
+  };
+  const folderOf = (item: Item): string => relative(item).split("/").slice(0, -1).join("/") || ".";
+
+  const announce = (): void => {
+    const waiting = batches().filter((batch) => batch.some((item) => !item.seen));
+    events.onCount(waiting.length);
+    const counts = new Map<string, number>();
+    for (const batch of waiting) counts.set(batch[0].project, (counts.get(batch[0].project) ?? 0) + 1);
+    events.onProjects(counts);
+  };
 
   void listen<Made>("panel-made", ({ payload }) => {
     // A re-render of the same file is news again: it moves up and is unseen.
@@ -122,12 +137,6 @@ export function mountReview(screen: HTMLElement, events: ReviewEvents): ReviewHa
     else peek(payload.project);
   });
   announce();
-
-  const relative = (item: Item): string => {
-    const root = events.projectPath(item.project);
-    return root && item.path.startsWith(`${root}/`) ? item.path.slice(root.length + 1) : item.path;
-  };
-  const folderOf = (item: Item): string => relative(item).split("/").slice(0, -1).join("/") || ".";
 
   /**
    * A batch in the order it is shown and reviewed: folder by folder, in the order each folder

@@ -43,6 +43,7 @@ export type ActionId =
   | "app.work"
   | "app.git"
   | "app.dash"
+  | "project.jump"
   | "wall.picker"
   | "wall.newTab"
   | "wall.newShell"
@@ -162,6 +163,15 @@ export const ACTIONS: ActionDef[] = [
     note: "Open the Dashboard of the project you are looking at",
     mac: "Meta+Shift+KeyD",
     other: "Ctrl+Shift+KeyD",
+  },
+  {
+    id: "project.jump",
+    group: "Workspace",
+    name: "Jump to project 1…9",
+    note: "Open a project from the sidebar: your pins first, then the rows in the order you see them",
+    digits: true,
+    mac: "Ctrl+Digit1",
+    other: "Alt+Digit1",
   },
   {
     id: "wall.picker",

@@ -814,6 +814,196 @@ html.sidebar-compact .project-group::before {
 @media (prefers-reduced-motion: reduce) {
   .project-row.is-asking .dot { animation: none; }
 }
+/* ---- The rail's marks. Each one answers "why would I click this row" before you do. ---- */
+
+/* The rail is narrow, so the row gives its width to what it says. Pin and menu float over the
+   second line's right end on hover, over the activity bars, so the chip and the quick button on
+   the first line stay clickable. */
+.project-row { grid-template-columns: 32px minmax(0, 1fr) auto; }
+.project-tools {
+  position: absolute;
+  z-index: 2;
+  right: 5px;
+  bottom: 3px;
+  display: none;
+  padding: 1px;
+  border-radius: 8px;
+  background: var(--bg-raised);
+  box-shadow: -10px 0 10px var(--bg-raised);
+}
+.project-row:hover .project-tools,
+.project-row:focus-within .project-tools,
+.project-tools:has(.is-open) { display: flex; }
+
+/* Name and platform pills share the first line. */
+.project-label {
+  grid-column: 2;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  min-width: 0;
+  overflow: hidden;
+}
+.project-label b { flex: 0 1 auto; min-width: 0; }
+.project-row small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.project-row small.t-warn { color: var(--warn); }
+.project-row small.t-ok { color: var(--ok); }
+.project-row small.t-live { color: var(--accent); }
+.project-row small.t-risk { color: var(--risk); }
+.project-row small.t-mute { color: var(--ink-dim); }
+
+/* One pill per platform of a folded app, each with its own state dot. */
+.project-pills { display: inline-flex; flex: none; gap: 3px; }
+.project-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: 17px;
+  padding: 0 6px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--ink-faint);
+  font: inherit;
+  font-size: var(--text-xs);
+  line-height: 1;
+  cursor: pointer;
+}
+.project-pill i { width: 5px; height: 5px; border-radius: 50%; background: var(--line); }
+.project-pill:hover { color: var(--ink); border-color: color-mix(in oklab, var(--accent) 40%, var(--line)); }
+.project-pill.is-on { color: var(--ink); border-color: color-mix(in oklab, var(--accent) 50%, var(--line)); }
+.project-pill.is-running i { background: var(--accent); }
+.project-pill.is-done i { background: var(--ok); }
+.project-pill.is-asking i { background: var(--warn); }
+
+/* Right column: git chip or quick answer on top, two weeks of commits under it. */
+.project-meta {
+  grid-column: 3;
+  grid-row: 1 / span 2;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 4px;
+  min-width: 0;
+}
+.project-meta:empty { display: none; }
+.project-chip {
+  color: var(--ink-faint);
+  font: var(--text-xs) ui-monospace, Menlo, monospace;
+  white-space: nowrap;
+}
+.project-chip.is-warn { color: var(--warn); }
+.project-spark { width: 28px; height: 10px; fill: color-mix(in oklab, var(--accent) 70%, var(--ink-faint)); }
+.project-spark rect.is-zero { fill: var(--line); }
+.project-row.is-active .project-spark { fill: var(--accent); }
+.project-quick {
+  padding: 2px 7px;
+  border: 1px solid currentColor;
+  border-radius: 6px;
+  background: transparent;
+  font: inherit;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  cursor: pointer;
+}
+.project-quick.t-warn { color: var(--warn); }
+.project-quick.t-ok { color: var(--ok); }
+.project-quick:hover { background: color-mix(in oklab, currentColor 12%, transparent); }
+.project-enter {
+  padding: 1px 5px;
+  border: 1px solid color-mix(in oklab, var(--accent) 45%, var(--line));
+  border-radius: 4px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font: var(--text-xs) ui-monospace, Menlo, monospace;
+  white-space: nowrap;
+}
+
+/* The loudest signal on the icon's corner: red for a falling app or a missing folder, accent for
+   work waiting in Review. The dot keeps the opposite corner, so the two never fight. */
+.project-badge {
+  position: absolute;
+  z-index: 3;
+  top: -5px;
+  right: -5px;
+  display: grid;
+  place-items: center;
+  min-width: 15px;
+  height: 15px;
+  padding: 0 3px;
+  border-radius: 8px;
+  box-shadow: 0 0 0 2px var(--bg-sunken);
+  color: var(--on-accent);
+  font-size: 9.5px;
+  font-style: normal;
+  font-weight: 750;
+  line-height: 1;
+}
+.project-badge.t-risk { background: var(--risk); }
+.project-badge.t-review { background: var(--m-work); }
+
+/* Untouched for a month and nothing waiting: present, but out of the way. */
+.project-row.is-stale { opacity: 0.55; }
+.project-row.is-stale:hover,
+.project-row.is-stale.is-active { opacity: 1; }
+.project-row.is-carded { background: color-mix(in oklab, var(--accent) 5%, var(--bg-raised)); border-color: var(--line-soft); }
+.project-row.is-target { border-color: color-mix(in oklab, var(--accent) 45%, var(--line)); }
+.project-row.is-drop {
+  border-color: var(--accent);
+  border-style: dashed;
+  background: var(--accent-soft);
+}
+
+/* Lane headers. Same voice as the group headers they replace, with a count on the right. */
+.lane-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.lane-head span { flex: 1; }
+.lane-head i {
+  font-style: normal;
+  font-weight: 600;
+  letter-spacing: 0;
+  color: var(--ink-faint);
+}
+.lane-head[data-lane="needs"] span { color: var(--warn); }
+.lane-head[data-lane="working"] span { color: var(--accent); }
+.lane-head.is-toggle {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: var(--text-xs);
+  text-align: left;
+  cursor: pointer;
+}
+.lane-head.is-toggle:hover span { color: var(--ink-dim); }
+.lane-head.is-toggle svg {
+  width: 12px;
+  height: 12px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  transform: rotate(-90deg);
+  transition: transform var(--fast) var(--ease);
+}
+.lane-head.is-toggle[aria-expanded="true"] svg { transform: none; }
+
+html.sidebar-compact .project-label,
+html.sidebar-compact .project-meta { display: none; }
+html.sidebar-compact .project-row:hover .project-tools,
+html.sidebar-compact .project-row:focus-within .project-tools { display: none; }
+html.sidebar-compact .lane-head i,
+html.sidebar-compact .lane-head svg { display: none; }
+html.sidebar-compact .lane-head.is-toggle { padding: 8px 0 4px; }
+
 /* The door to the rest of the portfolio. It scrolls with the list rather than sitting under it,
    and it borrows the project row's geometry exactly — same
    32px icon column, same 46px height, same rhythm. It reads as the sixth row and it is as easy

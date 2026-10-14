@@ -20,6 +20,7 @@ mod paths;
 mod platform;
 mod projects;
 mod project_desk;
+mod pulse;
 mod reports;
 mod sim;
 mod skills;
@@ -922,6 +923,18 @@ fn open_revenuecat_setup(project_id: Option<String>) -> Result<(), String> {
 #[tauri::command]
 async fn project_dashboard(project: String) -> Result<GitState, String> {
     off_main(move || Ok(projects::git_state(&find_project(&project)?.path))).await
+}
+
+/// Each project's row in its company's `portfolio.yaml`, for the sidebar's lanes.
+#[tauri::command]
+async fn project_standings() -> Result<Vec<pulse::Standing>, String> {
+    off_main(|| Ok(pulse::standings())).await
+}
+
+/// Two weeks of commits in one project's folder, for the sidebar's activity bars.
+#[tauri::command]
+async fn project_activity(project: String) -> Result<pulse::Activity, String> {
+    off_main(move || Ok(pulse::activity(&find_project(&project)?.path))).await
 }
 
 /// One native snapshot replaces the Git tab's former status and graph module processes.
@@ -3553,6 +3566,8 @@ fn main() {
             open_project_folder,
             open_revenuecat_setup,
             project_dashboard,
+            project_standings,
+            project_activity,
             git_overview,
             debug_profiles,
             debug_targets,

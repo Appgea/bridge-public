@@ -26,6 +26,7 @@ import { icon, type IconName } from "../icons";
 import { ENGINES, type SessionKind } from "./agent-kinds";
 import type { ProjectRunView } from "./runner";
 import { openGitSweep } from "./git-sync";
+import { nextMove, plural, type Tone as MoveTone } from "./next-move";
 import "./dashboard.css";
 
 const esc = (value: unknown): string =>
@@ -86,7 +87,7 @@ export type DashboardHandle = {
 };
 
 /** How loud a fact is allowed to be. `mute` is the calm default — silence, not a green badge. */
-type Tone = "mute" | "ok" | "warn" | "risk" | "live";
+type Tone = MoveTone;
 
 const TONES: readonly Tone[] = ["mute", "ok", "warn", "risk", "live"];
 
@@ -98,10 +99,6 @@ function tone(node: HTMLElement, next: Tone | null): void {
 
 function text(node: HTMLElement, value: string): void {
   if (node.textContent !== value) node.textContent = value;
-}
-
-function plural(n: number, one: string, many: string): string {
-  return `${n} ${n === 1 ? one : many}`;
 }
 
 function makeFact(host: HTMLElement): Fact {
@@ -504,66 +501,16 @@ export function mountDashboard(
   function paintPriority(): void {
     if (!currentProject || !currentGit) return;
 
-    const project = currentProject;
-    const git = currentGit;
-    let title = "Ready for the next task";
-    let detail = git.is_repo
-      ? "No human decisions or repository drift are waiting."
-      : "No human decision is waiting in this folder.";
-    let action = "";
-    let door: Door | null = null;
-    let mood: Tone = "ok";
-    let verdictWord = "at rest";
-    let verdictMood: Tone = "ok";
-
-    if (!project.exists) {
-      title = "Restore this project folder";
-      detail = "The saved path no longer exists, so Panel cannot open tools or start an agent.";
-      mood = "risk";
-      verdictWord = "missing";
-      verdictMood = "risk";
-    } else if (currentWork.length > 0) {
-      title = `${plural(currentWork.length, "decision", "decisions")} waiting for you`;
-      detail = currentWork[0].why?.trim() || "Review the agent's handoff before continuing.";
-      action = "Review work";
-      door = "files";
-      mood = "warn";
-      verdictWord = "needs you";
-      verdictMood = "warn";
-    } else if (currentRunning) {
-      title = "The agent is working";
-      detail = "Follow the live workshop below; anything needing a decision will appear here.";
-      mood = "live";
-      verdictWord = "agent live";
-      verdictMood = "live";
-    } else if (git.is_repo && git.behind > 0) {
-      title = "Sync before starting new work";
-      detail = `${plural(git.behind, "remote commit", "remote commits")} waiting to be pulled.`;
-      action = "Open Git";
-      door = "git";
-      mood = "warn";
-      verdictWord = "needs you";
-      verdictMood = "warn";
-    } else if (git.is_repo && git.dirty > 0) {
-      title = "Review the work in progress";
-      detail = `${plural(git.dirty, "changed file", "changed files")} not committed yet.`;
-      action = "Review changes";
-      door = "git";
-      mood = git.dirty >= 10 ? "warn" : "mute";
-      verdictWord = git.dirty >= 10 ? "needs you" : "in progress";
-      verdictMood = git.dirty >= 10 ? "warn" : "mute";
-    } else if (git.is_repo && git.ahead > 0) {
-      title = "Changes are ready to push";
-      detail = `${plural(git.ahead, "local commit", "local commits")} ahead of the remote.`;
-      action = "Open Git";
-      door = "git";
-      mood = "mute";
-      verdictWord = "ready";
-      verdictMood = "mute";
-    } else if (!git.is_repo) {
-      verdictWord = "idle";
-      verdictMood = "mute";
-    }
+    const move = nextMove({
+      exists: currentProject.exists,
+      work: currentWork.length,
+      why: currentWork[0]?.why,
+      running: currentRunning,
+      git: currentGit,
+    });
+    const { title, detail, action, door, mood } = move;
+    const verdictWord = move.verdict;
+    const verdictMood = move.verdictMood;
 
     text(priorityTitle, title);
     text(priorityBody, detail);
