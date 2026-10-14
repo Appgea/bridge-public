@@ -194,7 +194,7 @@ export function mountReview(screen: HTMLElement, events: ReviewEvents): ReviewHa
     for (const item of batch) item.seen = true;
     save();
     announce();
-    hidePeek();
+    hidePeek(project);
     openReviewDeck(deckItems, at, {
       title: `${events.projectName(project)} · ${count(batch)}`,
       agentName: events.agentName(project),
@@ -207,10 +207,9 @@ export function mountReview(screen: HTMLElement, events: ReviewEvents): ReviewHa
           return false;
         }
       },
-      onClose: (_result, finished) => {
-        // Reaching the end is the review. Closing halfway leaves the batch where it was.
-        if (finished) dismiss(batch);
-        else paint();
+      onClose: () => {
+        // Seen is reviewed: a batch that was opened does not wait for attention, finished or not.
+        dismiss(batch);
       },
     });
   }
@@ -320,29 +319,35 @@ export function mountReview(screen: HTMLElement, events: ReviewEvents): ReviewHa
 
   /* ------------------------------------------------------------------ peek */
 
-  let peekNode: HTMLElement | null = null;
-  let peekTimer = 0;
+  /** One card per project, stacked in the corner. A new batch never replaces another project's card. */
+  const peeks = new Map<string, { node: HTMLElement; timer: number }>();
+  const MAX_PEEKS = 4;
+  let peekStack: HTMLElement | null = null;
 
-  function hidePeek(): void {
-    window.clearTimeout(peekTimer);
-    peekNode?.classList.add("is-leaving");
-    const leaving = peekNode;
-    peekNode = null;
-    window.setTimeout(() => leaving?.remove(), 180);
+  function hidePeek(project?: string): void {
+    for (const [id, peekCard] of [...peeks]) {
+      if (project !== undefined && id !== project) continue;
+      window.clearTimeout(peekCard.timer);
+      peekCard.node.classList.add("is-leaving");
+      window.setTimeout(() => peekCard.node.remove(), 180);
+      peeks.delete(id);
+    }
   }
 
   /**
-   * New work, brought to you: a small card in the corner with the pictures themselves, and one
-   * button that opens the review right over whatever you were doing. It never takes focus and
-   * leaves on its own; the Review row keeps everything for later.
+   * New work, brought to you: a small card in the corner with the pictures themselves. Each
+   * project gets its own card and each card opens its own batch. × means "seen, done": it marks
+   * the batch reviewed. A card left alone just fades; the batch keeps waiting in Review.
    */
   function peek(project: string): void {
     if (events.busy()) return;
     const batch = batches().find((candidate) => candidate[0].project === project);
     if (!batch) return;
-    window.clearTimeout(peekTimer);
-    const card = peekNode ?? make("aside", "rv-peek");
+    const existing = peeks.get(project);
+    if (existing) window.clearTimeout(existing.timer);
+    const card = existing?.node ?? make("aside", "rv-peek");
     card.setAttribute("role", "status");
+    card.classList.remove("is-leaving");
     const faces = make("div", "rv-peek-faces");
     for (const item of batch.slice(-3)) {
       const face = make("span", `rv-peek-face is-${item.kind}`);
@@ -363,22 +368,36 @@ export function mountReview(screen: HTMLElement, events: ReviewEvents): ReviewHa
     open.addEventListener("click", () => {
       const latest = batches().find((candidate) => candidate[0].project === project);
       if (latest) review(latest);
+      else hidePeek(project);
     });
-    const later = make("button", "rv-peek-close", "×");
-    later.type = "button";
-    later.setAttribute("aria-label", "Later");
-    later.title = "Later — it stays in Review";
-    later.addEventListener("click", hidePeek);
-    card.replaceChildren(faces, text, open, later);
-    if (!peekNode) {
-      peekNode = card;
-      document.body.append(card);
-      card.addEventListener("mouseenter", () => window.clearTimeout(peekTimer));
+    const done = make("button", "rv-peek-close", "×");
+    done.type = "button";
+    done.setAttribute("aria-label", "Seen, mark reviewed");
+    done.title = "Seen — mark reviewed";
+    done.addEventListener("click", () => {
+      const latest = batches().find((candidate) => candidate[0].project === project);
+      hidePeek(project);
+      if (latest) dismiss(latest);
+    });
+    card.replaceChildren(faces, text, open, done);
+    const arm = (): number => window.setTimeout(() => hidePeek(project), 9000);
+    if (!existing) {
+      if (!peekStack) {
+        peekStack = make("div", "rv-peeks");
+        document.body.append(peekStack);
+      }
+      // The oldest card makes room; its batch stays in Review.
+      if (peeks.size >= MAX_PEEKS) hidePeek([...peeks.keys()][0]);
+      peekStack.append(card);
+      const entry = { node: card, timer: arm() };
+      peeks.set(project, entry);
+      card.addEventListener("mouseenter", () => window.clearTimeout(entry.timer));
       card.addEventListener("mouseleave", () => {
-        peekTimer = window.setTimeout(hidePeek, 4000);
+        entry.timer = window.setTimeout(() => hidePeek(project), 4000);
       });
+    } else {
+      existing.timer = arm();
     }
-    peekTimer = window.setTimeout(hidePeek, 9000);
   }
 
   function paint(): void {
@@ -440,6 +459,18 @@ export function mountReview(screen: HTMLElement, events: ReviewEvents): ReviewHa
     },
     clear() {
       openState = false;
+      // Leaving Review: whatever was on screen has been seen, so it does not stay in the queue.
+      let seenAny = false;
+      for (const [path, item] of items) {
+        if (item.seen) {
+          items.delete(path);
+          seenAny = true;
+        }
+      }
+      if (seenAny) {
+        save();
+        announce();
+      }
       for (const player of screen.querySelectorAll<HTMLMediaElement>("audio, video")) player.pause();
       screen.replaceChildren();
     },

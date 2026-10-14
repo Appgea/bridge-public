@@ -447,14 +447,25 @@ pub fn ensure_booted(udid: &str) -> Result<(), String> {
     Ok(())
 }
 
-/// Bring Simulator.app to the front. Non-blocking: the actual `open`/`osascript` run on a throwaway
+/// Bring the simulator window to the front. Non-blocking: the actual `open` runs on a throwaway
 /// thread so a caller on the PTY reader thread is never stalled, and the children get reaped.
+///
+/// Xcode 27 dropped Simulator.app for DeviceHub (`com.apple.dt.Devices`). `open -a Simulator`
+/// then fails, and since nothing read its status the run looked live with no window to see it
+/// in. Older Xcodes still ship Simulator.app, so it is tried first and DeviceHub only when it is
+/// not there. `open` activates what it opens, so no separate activate is needed.
 pub fn focus_simulator() {
     std::thread::spawn(|| {
-        let _ = crate::platform::command("open").args(["-a", "Simulator"]).status();
-        let _ = crate::platform::command("osascript")
-            .args(["-e", r#"tell application "Simulator" to activate"#])
-            .status();
+        let opened = crate::platform::command("open")
+            .args(["-a", "Simulator"])
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if !opened {
+            let _ = crate::platform::command("open")
+                .args(["-b", "com.apple.dt.Devices"])
+                .status();
+        }
     });
 }
 
