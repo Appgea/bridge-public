@@ -1,7 +1,8 @@
-/* The Servers board. It lives inside a Settings card, so it inherits that card's frame and
-   brings only the row language of its own: one dot per server, and what actually failed. */
+/* The Servers board. It is the Servers section of Settings, so its list is drawn like every
+   other group there: one surface, hairlines between rows. What it brings of its own is the row
+   language: one dot per server, and what actually failed. */
 
-.set-servers { --m: #5ec8d8; display: flex; flex-direction: column; gap: 8px; }
+.set-servers { --m: #5ec8d8; display: flex; flex-direction: column; gap: 12px; }
 
 .sh-bar { display: flex; align-items: baseline; gap: 10px; }
 .sh-tally { font-size: var(--text-sm); font-weight: 650; font-variant-numeric: tabular-nums; }
@@ -21,16 +22,20 @@
 .sh-refresh:hover:not(:disabled) { background: color-mix(in oklab, var(--m) 34%, var(--bg-raised)); }
 .sh-refresh:disabled { opacity: 0.6; cursor: default; }
 
-.sh-list { display: flex; flex-direction: column; gap: 5px; }
+.sh-list {
+  display: flex; flex-direction: column;
+  background: var(--bg-raised);
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+}
+.sh-list:empty { display: none; }
 
 .sh-row {
   display: grid; grid-template-columns: 9px minmax(130px, 220px) 1fr auto;
   align-items: center; gap: 12px;
-  padding: 9px 12px;
-  background: var(--bg-sunken);
-  border: 1px solid var(--line-soft);
-  border-radius: var(--radius-sm, 8px);
+  padding: 11px 14px;
 }
+.sh-row + .sh-row { border-top: 1px solid var(--line-soft); }
 
 .sh-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-faint); }
 .sh-up .sh-dot { background: var(--ok); }
@@ -72,6 +77,8 @@
   border: 1px dashed var(--line);
   border-radius: var(--radius-sm, 8px);
 }
+/* Inside the list surface already, so it drops its own frame rather than nest one. */
+.sh-list > .sh-empty { border: 0; border-radius: 0; background: transparent; }
 .sh-empty-line { font-size: var(--text-md); font-weight: 650; color: var(--ink); }
 .sh-empty-hint { margin-top: 5px; font-size: var(--text-sm); line-height: 1.55; color: var(--ink-dim); }
 .sh-empty-cmd {

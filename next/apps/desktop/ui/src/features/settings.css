@@ -1,5 +1,7 @@
-/* Settings, as a screen. A thin head, then cards that flow into as many columns as fit —
-   the whole page should be readable without scrolling on a normal window. Tokens only. */
+/* Settings, as a screen, shaped like a Mac settings window. Sections on the left, one section
+   on the right, rows grouped on quiet surfaces with hairlines between them. Space does the
+   grouping: a row gap is smaller than a group gap, which is smaller than the section margin.
+   Tokens only. */
 
 .settings[hidden] { display: none; }
 
@@ -19,10 +21,8 @@
 .set-inner {
   flex: 1;
   min-height: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 8px 10px 10px;
+  display: grid;
+  grid-template-columns: 212px minmax(0, 1fr);
 }
 .set-inner.is-enter { animation: set-in var(--base) var(--ease) both; }
 @keyframes set-in {
@@ -30,108 +30,247 @@
   to   { transform: none;            opacity: 1; }
 }
 
-/* ------------------------------------------------------------------- head */
+/* ------------------------------------------------------------------- side */
 
-.set-head {
+.set-side {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 18px 10px 14px 14px;
+}
+
+.set-brand { display: flex; align-items: center; gap: 8px; padding: 0 10px; min-height: 26px; }
+.set-brand i { display: inline-flex; color: var(--accent); }
+.set-brand i .ui-icon { width: 16px; height: 16px; }
+.set-brand b { font-size: var(--text-lg); font-weight: 650; letter-spacing: -0.015em; color: var(--ink); }
+
+.set-nav { display: flex; flex-direction: column; gap: 2px; }
+
+.set-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  height: 32px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  text-align: left;
+  font-size: var(--text-md);
+  font-weight: 550;
+  color: var(--ink-dim);
+  transition: background var(--fast) var(--ease), color var(--fast) var(--ease);
+}
+.set-nav-item i { display: inline-flex; flex: none; }
+.set-nav-item i .ui-icon { width: 16px; height: 16px; }
+.set-nav-item span { flex: 1; min-width: 0; }
+.set-nav-item:hover {
+  transform: none;
+  color: var(--ink);
+  background: color-mix(in oklab, var(--ink) 6%, transparent);
+}
+.set-nav-item.is-active {
+  color: var(--ink);
+  background: color-mix(in oklab, var(--accent) 16%, transparent);
+}
+.set-nav-item.is-active i { color: var(--accent); }
+
+/* Shortcuts that share a chord. The only count on the list, so it can afford the red. */
+.set-nav-badge {
+  flex: none;
+  min-width: 18px;
+  height: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  font-size: var(--text-xs);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--risk);
+  background: color-mix(in oklab, var(--risk) 18%, transparent);
+}
+
+.set-side-foot {
+  margin-top: auto;
+  padding: 0 10px;
+  font-size: var(--text-xs);
+  color: var(--ink-faint);
+}
+
+/* ------------------------------------------------------------------- main */
+
+/* --measure is the content's width. The bar shares it, so Done sits at the content's edge
+   instead of across an empty half of a wide window. */
+.set-main {
+  --measure: 720px;
+  --gutter: 28px;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+/* The keymap gets two columns, so every chord fits in one look on a normal window. */
+.set-main[data-section="shortcuts"] { --measure: 1000px; }
+
+.set-bar {
   flex: none;
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 8px;
+  max-width: calc(var(--measure) + 2 * var(--gutter));
+  padding: 16px var(--gutter) 0;
 }
-.set-title { display: inline-flex; align-items: center; gap: 7px; }
-.set-title i { display: inline-flex; color: var(--accent); }
-.set-title i .ui-icon { width: 15px; height: 15px; }
-.set-title b { font-size: var(--text-md); font-weight: 600; letter-spacing: -0.01em; color: var(--ink); }
+.set-title {
+  flex: 1;
+  margin: 0;
+  font-size: var(--text-xl);
+  font-weight: 650;
+  letter-spacing: -0.015em;
+  color: var(--ink);
+}
+.set-actions { display: flex; gap: 8px; }
 
-.set-hint { flex: 1; font-size: var(--text-xs); color: var(--ink-faint); }
-
-.set-reset-all,
-.set-done {
+.set-button {
   flex: none;
   border: 1px solid var(--line);
   border-radius: 7px;
-  padding: 4px 10px;
-  font-size: var(--text-xs);
+  padding: 5px 12px;
+  font-size: var(--text-sm);
   font-weight: 600;
   background: var(--bg-raised);
-  color: var(--ink-dim);
+  color: var(--ink);
   transition: color var(--fast) var(--ease), border-color var(--fast) var(--ease),
     background var(--fast) var(--ease);
 }
-.set-reset-all:hover { transform: none; color: var(--ink); border-color: var(--line); }
-.set-done {
+.set-button:hover:not(:disabled) {
+  transform: none;
+  border-color: color-mix(in oklab, var(--accent) 40%, var(--line));
+}
+.set-button:disabled { opacity: 0.45; cursor: default; }
+.set-button.is-primary {
   color: var(--accent);
   border-color: color-mix(in oklab, var(--accent) 40%, transparent);
   background: color-mix(in oklab, var(--accent) 14%, transparent);
 }
-.set-done:hover { transform: none; background: color-mix(in oklab, var(--accent) 22%, transparent); }
+.set-button.is-primary:hover { background: color-mix(in oklab, var(--accent) 22%, transparent); }
 
-/* ------------------------------------------------------------------- grid */
-
-/* Columns are a fit, not a count: a wide window reads four cards across, a narrow one stacks.
-   align-items:start keeps a short card short instead of stretching it to the row's height. */
-.set-grid {
+.set-body {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(268px, 1fr));
-  gap: 8px;
-  align-content: start;
-  align-items: start;
+  padding: 4px var(--gutter) 36px;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
+}
+/* A readable measure. A switch 1,100px from its label is a switch nobody connects to it. */
+.set-body > * { max-width: var(--measure); }
+
+.set-lead {
+  margin: 0 0 20px;
+  font-size: var(--text-md);
+  line-height: 1.5;
+  color: var(--ink-dim);
 }
 
-.set-card {
-  border: 1px solid var(--line-soft);
-  border-radius: 10px;
-  background: var(--bg-raised);
-  padding: 8px 10px 6px;
+.set-state {
+  margin: 0;
+  padding: 10px 2px;
+  font-size: var(--text-sm);
+  color: var(--ink-dim);
 }
-.set-card-head {
-  margin: 0 0 4px;
-  font-size: var(--text-xs);
-  font-weight: 700;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
-  color: var(--ink-faint);
-}
+.set-state.is-error { color: var(--risk); }
 
-/* ------------------------------------------------------------------- rows */
+/* ------------------------------------------------------------------- groups */
 
-/* One line per setting. The explanation is the row's tooltip — a second line under every row
-   triples the page height to say what the name mostly already says. */
-.set-key {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 27px;
-  padding: 1px 0;
-  border-top: 1px solid color-mix(in oklab, var(--line-soft) 60%, transparent);
-}
-.set-card > .set-key:first-of-type { border-top: 0; }
-.set-key-name {
-  flex: 1;
-  min-width: 0;
+.set-group + .set-group { margin-top: 24px; }
+
+.set-group-head {
+  margin: 0 0 7px 2px;
   font-size: var(--text-sm);
   font-weight: 600;
   color: var(--ink-dim);
+}
+
+.set-list {
+  border: 1px solid var(--line-soft);
+  border-radius: 10px;
+  background: var(--bg-raised);
+}
+
+.set-group-foot {
+  margin: 7px 2px 0;
+  font-size: var(--text-xs);
+  line-height: 1.45;
+  color: var(--ink-faint);
+}
+
+/* Two columns of groups, filled top to bottom, never splitting a group across them. */
+.set-columns { columns: 2 320px; column-gap: 24px; }
+.set-columns > .set-group { break-inside: avoid; }
+/* A group that opens a column needs no gap above it. Multicol keeps margins after a column
+   break in some engines, so the gap is padding on the group, not margin between groups. */
+.set-columns > .set-group + .set-group { margin-top: 0; }
+.set-columns > .set-group { padding-bottom: 24px; }
+
+/* ------------------------------------------------------------------- rows */
+
+.set-row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-height: 52px;
+  padding: 10px 14px;
+}
+.set-row + .set-row { border-top: 1px solid var(--line-soft); }
+
+.set-row-text {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.set-row-name {
+  font-size: var(--text-md);
+  font-weight: 550;
+  color: var(--ink);
+}
+.set-row-note {
+  font-size: var(--text-sm);
+  line-height: 1.45;
+  color: var(--ink-faint);
+}
+
+/* A shortcut is one line: its name, then its chord. The chords line up in a column so the list
+   scans like a keyboard. */
+.set-key {
+  gap: 8px;
+  min-height: 36px;
+  padding: 5px 10px 5px 14px;
+}
+.set-key .set-row-name {
+  flex: 1;
+  min-width: 0;
+  font-weight: 500;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.set-key:hover .set-key-name { color: var(--ink); }
-.set-key.is-clash .set-key-name { color: var(--risk); }
+.set-key.is-clash .set-row-name { color: var(--risk); }
 
-/* The chord reads as a key, so a column of them scans like a keyboard. */
 .set-chord {
   flex: none;
-  min-width: 66px;
+  min-width: 70px;
   padding: 3px 8px;
   border: 1px solid var(--line);
   border-radius: 6px;
   background: var(--bg);
   font-size: var(--text-xs);
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
   color: var(--ink);
   transition: color var(--fast) var(--ease), border-color var(--fast) var(--ease),
     background var(--fast) var(--ease);
@@ -155,12 +294,12 @@
 
 .set-reset {
   flex: none;
-  width: 20px;
+  width: 22px;
   background: transparent;
   border: 0;
   border-radius: 5px;
   padding: 2px 0;
-  font-size: var(--text-xs);
+  font-size: var(--text-sm);
   color: var(--ink-faint);
 }
 .set-reset[hidden] { display: none; }
@@ -170,7 +309,7 @@
 .set-toggle {
   flex: none;
   position: relative;
-  width: 32px; height: 18px;
+  width: 34px; height: 20px;
   padding: 0;
   border-radius: 999px;
   border: 1px solid var(--line);
@@ -181,7 +320,7 @@
 .set-knob {
   position: absolute;
   top: 2px; left: 2px;
-  width: 12px; height: 12px;
+  width: 14px; height: 14px;
   border-radius: 999px;
   background: var(--ink-faint);
   transition: translate var(--fast) var(--ease), background var(--fast) var(--ease);
@@ -196,14 +335,15 @@
   flex: none;
   display: inline-flex;
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 7px;
   overflow: hidden;
 }
 .set-seg-item {
+  min-width: 40px;
   background: transparent;
   border: 0;
-  padding: 3px 8px;
-  font-size: var(--text-xs);
+  padding: 4px 10px;
+  font-size: var(--text-sm);
   font-weight: 600;
   color: var(--ink-dim);
 }
@@ -216,75 +356,32 @@
 
 /* -------------------------------------------------------------- extensions */
 
-/* Extensions are the one thing on this page a name cannot carry alone: a row has to say what the
-   module does and what it wants before anyone can decide. So these rows are three lines, not one,
-   and the card spans two columns so those lines are not read through a 268px straw. */
-.set-card-wide { grid-column: span 2; }
-@media (max-width: 720px) {
-  .set-card-wide { grid-column: auto; }
-}
+.set-ext { align-items: flex-start; gap: 12px; padding: 12px 14px; }
 
-.set-card-lead {
-  margin: 0 0 6px;
-  font-size: var(--text-xs);
-  line-height: 1.45;
-  color: var(--ink-faint);
-}
-
-.set-ext {
-  display: flex;
-  align-items: flex-start;
-  gap: 9px;
-  padding: 7px 0;
-  border-top: 1px solid color-mix(in oklab, var(--line-soft) 60%, transparent);
-}
-.set-card > .set-ext:first-of-type { border-top: 0; }
-
+/* The manifest's glyph, on a tile so a letter, a symbol and an emoji all sit the same size. */
 .set-ext-icon {
   flex: none;
-  width: 20px;
-  margin-top: 1px;
-  font-size: var(--text-md);
-  line-height: 1.2;
-  text-align: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  font-size: var(--text-xl);
+  line-height: 1;
   color: var(--ink-dim);
+  background: color-mix(in oklab, var(--ink) 7%, transparent);
 }
+.set-ext > .set-toggle { margin-top: 5px; }
 
-.set-ext-body {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-.set-ext-name {
-  font-size: var(--text-sm);
-  font-weight: 600;
-  color: var(--ink);
-}
-.set-ext-tag {
-  padding: 0 5px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  font-size: var(--text-xs);
-  font-style: normal;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: var(--ink-faint);
-}
-.set-ext-note {
-  font-size: var(--text-xs);
-  line-height: 1.45;
-  color: var(--ink-faint);
-}
-
-/* A missing tool is information, not a block — it never turns the row off, so it must not read
-   like an error either. Risk-tinted, one line, no icon. */
+/* A missing tool is information, not a block. It never turns the row off, so it reads as a
+   caution, not an error. */
 .set-ext-missing {
   font-size: var(--text-xs);
   font-weight: 600;
-  color: color-mix(in oklab, var(--risk) 78%, var(--ink-faint));
+  color: color-mix(in oklab, var(--warn) 80%, var(--ink-faint));
 }
-
-.set-ext > .set-toggle { margin-top: 3px; }
+.set-ext-failed {
+  font-size: var(--text-xs);
+  font-weight: 600;
+  color: var(--risk);
+}

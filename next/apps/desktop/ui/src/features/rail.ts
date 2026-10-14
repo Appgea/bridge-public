@@ -134,7 +134,9 @@ export function gitChip(git: GitState | null): { text: string; warn: boolean; ti
   const mainline = ["main", "master", "develop", ""].includes(git.branch);
   if (!mainline) notes.unshift(`on ${git.branch}`);
   if (!tokens.length && mainline) return null;
-  const text = (mainline ? tokens : [`⎇ ${git.branch.slice(0, 12)}`, ...tokens]).slice(0, 2).join(" ");
+  // Off the mainline shows as a bare ⎇. The branch name is in the tooltip and the card: on a
+  // 300px rail it would take the width the project's own name needs.
+  const text = (mainline ? tokens : ["⎇", ...tokens]).slice(0, 3).join(" ");
   return { text, warn: git.behind > 0 || git.dirty >= 10, title: notes.join(" · ") };
 }
 

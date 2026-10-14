@@ -20,7 +20,8 @@ it. There is no control channel that can break, because there is no control chan
 **2. The project is the unit.** The sidebar is the portfolio, and that is the main navigation.
 Each project owns an agent, a working set, a stage and an ambient feed. Selecting a project
 changes what you SEE; it never tears down what is RUNNING. Tavla and Sudokov can both be working
-while you read Payee.
+while you read Payee. The sidebar sorts the portfolio into lanes by what each project asks of you,
+so the rail at rest is the handful that matters today.
 
 ## The working set — the thing that is not a file tree
 

@@ -45,6 +45,26 @@
     fitstrail: { branch: "strava-import", ahead: 0, behind: 3, dirty: 0, is_repo: true },
   };
 
+  /** Where each app stands in ops/portfolio.yaml. The sidebar sorts its lanes from this. */
+  const STANDINGS = [
+    { project: "tavla", key: "tavla", status: "live", notes: "Online matches and the doubling cube." },
+    { project: "wolf2048", key: "wolf2048", status: "building", notes: "Daily challenge mode." },
+    { project: "sudokov", key: "sudokov", status: "review", notes: "1.4 in App Store review." },
+    { project: "payee", key: "payee", status: "live", notes: "" },
+    { project: "memor", key: "memor", status: "paused", notes: "" },
+    { project: "fitstrail", key: "fitstrail", status: "building", notes: "Strava import." },
+  ];
+
+  /** Commits per day for the last two weeks, oldest first. The sidebar draws these as bars. */
+  const DAYS = {
+    tavla: [0, 1, 0, 2, 3, 0, 0, 1, 4, 2, 0, 3, 5, 2],
+    wolf2048: [2, 0, 0, 1, 0, 3, 2, 0, 0, 4, 1, 0, 2, 3],
+    sudokov: [0, 0, 3, 1, 0, 0, 0, 2, 0, 0, 1, 0, 0, 1],
+    payee: [0, 0, 0, 0, 1, 0, 0, 0, 0, 2, 0, 0, 0, 1],
+    memor: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    fitstrail: [1, 0, 2, 0, 0, 1, 0, 0, 3, 0, 1, 2, 0, 1],
+  };
+
   const session = (projectId, n, kind, title) => ({
     id: `s-${projectId}-${n}`,
     project: projectId,
@@ -414,6 +434,12 @@ void main() {
     restore_wall: () => ({ savedAt: 0, sessions: SESSIONS.map((s) => ({ session: s, screen: "" })) }),
     project_dashboard: ({ project: id }) => GIT[id] ?? { branch: "", ahead: 0, behind: 0, dirty: 0, is_repo: false },
     project_modules: () => ({ configured: false, enabled: ["git"], work_exclude: [] }),
+    project_standings: () => STANDINGS,
+    project_activity: ({ project: id }) => {
+      const days = DAYS[id] ?? Array(14).fill(0);
+      const last = days.reduce((at, n, i) => (n ? i : at), -1);
+      return { last_commit: last >= 0 ? now - (13 - last) * 86_400_000 : 0, days };
+    },
     run_inventory: () => ({ devices: [], leases: {}, androidDevices: [], iosDevices: [], targets: [] }),
     session_busy: () => false,
     session_cwd: ({ session: id }) => {
@@ -440,6 +466,7 @@ void main() {
       { path: "test/game/resign_clears_offer_test.dart", line: 2, direction: "incoming", detail: "DoublingCube" },
     ],
     symbol_locations: () => [],
+    project_symbols: () => [],
     warm_code_nav: () => null,
     debug_breakpoints: () => ({}),
     debug_profiles: () => [],

@@ -269,10 +269,16 @@ html.chat-hidden #chatRail { display: none; }
     radial-gradient(210px 180px at 4% -4%, var(--accent-soft), transparent 72%),
     linear-gradient(180deg, color-mix(in oklab, var(--bg-sunken) 88%, var(--bg-raised)), var(--bg-sunken) 38%);
   border-right: 1px solid var(--line-soft);
-  /* Clips the labels while the rail animates: text reads as revealed by the moving edge
-     instead of wrapping under it mid-transition. */
-  overflow: hidden;
+  /* One scroller for the whole rail. Brand, Home, the nav cards and the projects move up
+     together, so a long portfolio gets the full height instead of the space left under a
+     frozen header. Overflow-x stays hidden: it clips the labels while the rail animates, so
+     text reads as revealed by the moving edge instead of wrapping under it mid-transition. */
+  overflow: hidden auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
 }
+/* Nothing in a scrolling column may shrink, or the cards would squash instead of scrolling. */
+.sidebar > * { flex: none; }
 
 .brand { display: flex; align-items: center; gap: 10px; min-height: 38px; padding: 0 2px; }
 .brand-mark {
@@ -423,17 +429,11 @@ html.sidebar-compact .nav-badge {
   letter-spacing: 0;
   text-align: center;
 }
-/* One scroller for the whole rail. The filter, the label, the rows, the door and the "+" scroll
-   together — they are one list, not a list with chrome bolted above and below it. Nothing here
-   stretches: the door and the "+" belong directly under the last row. The empty rail below them
-   is the point — that space is the difference between a wall of apps and a place you can find
-   your way in. Overflow-x is hidden only to swallow the list's 2px bleed. */
+/* The projects scroll with the rest of the sidebar now, not inside a box of their own. The
+   filter, the label, the rows, the door and the "+" stay one list. Overflow-x is hidden only to
+   swallow the list's 2px bleed. */
 .projects-section {
-  flex: 1;
-  min-height: 0;
-  overflow: hidden auto;
-  scrollbar-width: thin;
-  scrollbar-color: var(--line) transparent;
+  overflow-x: hidden;
 }
 
 /* The label carries the two controls that replaced auto-sorting: what is live, and what rule the
@@ -1092,8 +1092,11 @@ html.sidebar-compact .lane-head.is-toggle { padding: 8px 0 4px; }
 }
 .add-project:hover { transform: none; color: var(--accent); border-color: color-mix(in oklab, var(--accent) 38%, var(--line)) !important; background: var(--accent-soft); }
 
+/* The foot sits under the list, or at the bottom of a short rail. It scrolls like everything
+   else: nothing in the sidebar is pinned. */
 .side-foot {
   display: flex; align-items: center; justify-content: flex-end; gap: 8px;
+  margin-top: auto;
   padding-top: 10px;
   border-top: 1px solid var(--line-soft);
   font-size: var(--text-xs); color: var(--ink-faint);
@@ -1188,8 +1191,8 @@ html.sidebar-compact .project-list {
   padding: 2px 8px;
   gap: 8px;
 }
-html.sidebar-compact .projects-section { scrollbar-width: none; }
-html.sidebar-compact .projects-section::-webkit-scrollbar { width: 0; height: 0; }
+html.sidebar-compact .sidebar { scrollbar-width: none; }
+html.sidebar-compact .sidebar::-webkit-scrollbar { width: 0; height: 0; }
 
 /* Dock tiles: the 28px list icon grows into a 44px squircle and IS the row. The full-width
    hover wash goes; at this size the tile answers hover itself, like a dock icon should. Row

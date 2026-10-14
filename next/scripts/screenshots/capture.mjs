@@ -91,6 +91,15 @@ const SHOTS = [
     },
   },
   {
+    // The other terminal layout: a row of terminal tabs under the strip, one terminal at a time.
+    name: "tabs",
+    async prepare(page) {
+      await page.click("#terminalsButton");
+      await settle(page);
+      await page.click('.terms-layout-item[aria-label="Tabs layout"]');
+    },
+  },
+  {
     name: "reports",
     async prepare(page) {
       await page.click("#chatButton");

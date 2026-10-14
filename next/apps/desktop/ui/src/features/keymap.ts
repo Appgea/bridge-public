@@ -46,6 +46,8 @@ export type ActionId =
   | "project.jump"
   | "wall.picker"
   | "wall.newTab"
+  | "wall.layout"
+  | "term.select"
   | "wall.newShell"
   | "tab.next"
   | "tab.prev"
@@ -198,6 +200,14 @@ export const ACTIONS: ActionDef[] = [
     other: "Ctrl+Alt+Shift+KeyT",
   },
   {
+    id: "wall.layout",
+    group: "Workspace",
+    name: "Switch terminal layout",
+    note: "Flip the Terminals screen between grid, every terminal at once, and tabs, one terminal at a time",
+    mac: "Meta+Shift+KeyL",
+    other: "Ctrl+Shift+KeyL",
+  },
+  {
     id: "tab.next",
     group: "Tabs",
     name: "Next tab",
@@ -230,10 +240,19 @@ export const ACTIONS: ActionDef[] = [
     other: "Ctrl+Shift+Tab",
   },
   {
+    id: "term.select",
+    group: "Terminals",
+    name: "Terminal 1…9",
+    note: "Go to that terminal of this tab: its seat on the grid, or its tab in the second row",
+    digits: true,
+    mac: "Alt+Digit1",
+    other: "Alt+Shift+Digit1",
+  },
+  {
     id: "term.focusLeft",
     group: "Terminals",
     name: "Focus left",
-    note: "Caret to the nearest tile in that direction on the wall",
+    note: "Caret to the nearest tile in that direction on the wall. Tabs layout: the previous terminal tab",
     mac: "Meta+Alt+ArrowLeft",
     other: "Ctrl+Alt+ArrowLeft",
   },
@@ -241,7 +260,7 @@ export const ACTIONS: ActionDef[] = [
     id: "term.focusRight",
     group: "Terminals",
     name: "Focus right",
-    note: "Caret to the nearest tile in that direction on the wall",
+    note: "Caret to the nearest tile in that direction on the wall. Tabs layout: the next terminal tab",
     mac: "Meta+Alt+ArrowRight",
     other: "Ctrl+Alt+ArrowRight",
   },
@@ -249,7 +268,7 @@ export const ACTIONS: ActionDef[] = [
     id: "term.focusUp",
     group: "Terminals",
     name: "Focus up",
-    note: "Caret to the nearest tile in that direction on the wall",
+    note: "Caret to the nearest tile in that direction on the wall. Tabs layout: the previous top tab",
     mac: "Meta+Alt+ArrowUp",
     other: "Ctrl+Alt+ArrowUp",
   },
@@ -257,7 +276,7 @@ export const ACTIONS: ActionDef[] = [
     id: "term.focusDown",
     group: "Terminals",
     name: "Focus down",
-    note: "Caret to the nearest tile in that direction on the wall",
+    note: "Caret to the nearest tile in that direction on the wall. Tabs layout: the next top tab",
     mac: "Meta+Alt+ArrowDown",
     other: "Ctrl+Alt+ArrowDown",
   },

@@ -22,6 +22,7 @@ how to add a visual. This file is how to get it running.
 - [Requirements](#requirements)
 - [Install](#install)
 - [First run](#first-run)
+- [Terminals](#terminals)
 - [Agents](#agents)
 - [Update and uninstall](#update-and-uninstall)
 - [Troubleshooting](#troubleshooting)
@@ -32,9 +33,15 @@ how to add a visual. This file is how to get it running.
 The screenshots use a made-up portfolio. [CONTRIBUTING.md](CONTRIBUTING.md#screenshots) shows how
 to regenerate them.
 
-**Terminals.** Every agent and shell across your projects, live, on one wall.
+**Terminals.** Every agent and shell across your projects, live, on one wall. The sidebar sorts
+projects into lanes by what they need from you.
 
 ![Five agents and shells across four projects on the terminal wall, in the dark theme](docs/screenshots/hero.png)
+
+**Terminal tabs.** The other layout: a row of terminal tabs under the top tabs, one terminal at
+full size.
+
+![The tabs layout: terminals grouped by project in a second tab row, with one Claude session open](docs/screenshots/tabs.png)
 
 **Home.** Every project, its branch and changes, and what each agent last reported.
 
@@ -110,9 +117,14 @@ To build without installing over your daily copy, pass an empty folder:
    arrow next to it.
 3. Give the agent a task in its terminal. Panel watches the session from there.
 
-The sidebar shows each project's state: **working**, **needs you** when an agent waits on a
-question or a permission, **your turn** when it finished, and **idle**. Agents post updates to
-**Reports**. Changed files appear on the Dashboard and in **Work**.
+The sidebar sorts projects into lanes: **Needs you** (an agent waits on a question or a
+permission, finished its turn, or left work to review), **Working**, **Shipping**, **In
+progress**, **Live** and **Quiet**. Shipping and Live come from `ops/portfolio.yaml`. Quiet folds
+away. Each row says what is waiting, its git state and two weeks of commits. Hover a row for the
+next move, the last report and quick actions. You can answer a Claude permission prompt from
+there. ⌃1…⌃9 open projects, and typing `tavla release` in the filter runs that action on that
+project. Agents post updates to **Reports**. Changed files appear on the Dashboard and in
+**Work**.
 
 Panel creates its home on first launch:
 
@@ -132,6 +144,28 @@ content**: schema comments, `_template.md` files, empty indexes. Rewrite
 The editor and project tools can change your project files. Shared workflows create links in
 agent skill folders such as `~/.claude/skills`. The personal notebook lives at
 `~/.appgea/notes.md`.
+
+## Terminals
+
+The Terminals screen has two layouts. Pick one in **Settings → General → Terminals**,
+with the switch at the right end of the top row, or with ⌘⇧L.
+
+- **Grid** shows every terminal of a tab at once.
+- **Tabs** adds a second row with one tab per terminal, grouped by project. One terminal shows at
+  full size.
+
+| keys | does |
+|---|---|
+| ⌘1…⌘9 | open a top tab |
+| ⌘⌥↑ / ⌘⌥↓ | previous / next top tab (tabs layout) |
+| ⌘⌥← / ⌘⌥→ | previous / next terminal (tabs layout), or the tile beside it (grid) |
+| ⌥1…⌥9 | open a terminal of this tab |
+| ⌃Tab / ⌃⇧Tab | next / previous terminal |
+| ⌘N, ⌘T, ⌘W | new terminal, new shell here, close |
+| ⌘⌥1…⌘⌥9 | move the terminal to that tab |
+
+Every chord can be changed in **Settings → Shortcuts**. Drag a terminal tab to reorder it, or
+onto a top tab to move it there.
 
 ## Agents
 
