@@ -53,6 +53,39 @@ for progress. Send a short title, ONE sentence `text`, an `outcome` (progress|do
 needs_decision), and `flow` code refs {ref, label, detail}. Every screenshot goes in `images`, \
 CAPTIONED; clips in `audio`; video in `video`, shown as a link.";
 
+/// Which agent this is. Workers build a project and report to the Inbox. The manager is the one
+/// agent that does neither, and the worker rule told it it was a worker: it filed reports to
+/// itself and had no idea what the Manager screen was.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Role {
+    Worker,
+    Manager,
+}
+
+fn manager_rule() -> String {
+    let reports = crate::paths::brain_dir().join("reports");
+    format!(
+        "You are the Manager inside Panel, the human's admin app for the Appgea portfolio. You are \
+not a worker. You do not change app code and you do not file reports, so never call send_to_user \
+or panel_send.py. TALK TO THE HUMAN IN THIS TERMINAL: it is Panel's Manager screen, opened with \
+Cmd+Shift+M. Your folder is the ops tree, the company brain. Its AGENTS.md is your standing \
+instructions, and he edits it from that screen. Workers are separate agents, one or more per \
+project, each in its own Panel terminal. You cannot see or type into them. What they report lands \
+in {} as one Markdown log per project, newest entry last. Read those logs and ops to answer what \
+is going on. Your job: tell him where things stand, plan the work, keep ops current, and write \
+briefs he can hand to a worker.",
+        reports.display()
+    )
+}
+
+/// The rule for this role, in the one place every engine's flags read it from.
+fn rule_for(panel_home: &Path, role: Role) -> String {
+    match role {
+        Role::Worker => rule_with_fallback(panel_home),
+        Role::Manager => manager_rule(),
+    }
+}
+
 /// Appended for every engine: the panel MCP is the good path, and this is what to do when it is
 /// not there. Codex sandboxes, engines with no session-scoped MCP flag, and anything new all fall
 /// back to the same script, so "the pictures never showed up" stops being per-engine luck.
@@ -71,10 +104,10 @@ values, one --image per screenshot, --audio per clip and --video per film (plus 
 }
 
 /// Build the argv for `claude`, wiring whichever shims actually exist on disk.
-pub fn agent_args(panel_home: &Path, port: u16, instance: &str) -> AgentLaunch {
+pub fn agent_args(panel_home: &Path, port: u16, instance: &str, role: Role) -> AgentLaunch {
     let mut args = vec![
         "--append-system-prompt".into(),
-        rule_with_fallback(panel_home),
+        rule_for(panel_home, role),
     ];
 
     if let Some(settings) = write_settings(panel_home, instance) {
@@ -91,8 +124,8 @@ pub fn agent_args(panel_home: &Path, port: u16, instance: &str) -> AgentLaunch {
 
 /// Codex accepts arbitrary config as per-process `-c` overrides. This keeps Panel's MCP and
 /// instruction scoped to the hosted terminal instead of modifying the user's global config.
-pub fn codex_args(panel_home: &Path, port: u16, instance: &str) -> AgentLaunch {
-    let rule = rule_with_fallback(panel_home);
+pub fn codex_args(panel_home: &Path, port: u16, instance: &str, role: Role) -> AgentLaunch {
+    let rule = rule_for(panel_home, role);
     let Some(server) = panel_server(panel_home) else {
         // No MCP to wire, but the instruction (and its script fallback) is still worth having —
         // an engine with no panel used to launch completely mute.
@@ -152,12 +185,13 @@ fn home_dir() -> String {
 
 /// Grok has a session-scoped rules flag but no session-scoped MCP flag. Give it the same behavior
 /// through the tiny sender script; PANEL_PORT/INSTANCE arrive through the PTY environment.
-pub fn grok_args(panel_home: &Path) -> AgentLaunch {
-    if !panel_home.join("panel_send.py").is_file() {
+pub fn grok_args(panel_home: &Path, role: Role) -> AgentLaunch {
+    // A worker's rule is only worth sending with the sender it names. The manager's never needs it.
+    if role == Role::Worker && !panel_home.join("panel_send.py").is_file() {
         return AgentLaunch { args: Vec::new() };
     }
     AgentLaunch {
-        args: vec!["--rules".into(), rule_with_fallback(panel_home)],
+        args: vec!["--rules".into(), rule_for(panel_home, role)],
     }
 }
 
@@ -246,7 +280,7 @@ mod tests {
 
     #[test]
     fn a_panel_home_without_shims_still_launches_with_only_the_reporting_rule() {
-        let launch = agent_args(Path::new("/nonexistent"), 1234, "i1");
+        let launch = agent_args(Path::new("/nonexistent"), 1234, "i1", Role::Worker);
         assert_eq!(
             launch.args.first().map(String::as_str),
             Some("--append-system-prompt")
@@ -263,7 +297,7 @@ mod tests {
         if !home.join("session_hook.py").is_file() {
             return; // not a full checkout; nothing to assert
         }
-        let launch = agent_args(&home, 4321, "i1");
+        let launch = agent_args(&home, 4321, "i1", Role::Worker);
         assert!(launch.args.iter().any(|arg| arg == "--settings"));
         assert!(launch.args.iter().any(|arg| arg == "--mcp-config"));
         let settings_index = launch
@@ -288,7 +322,7 @@ mod tests {
         if !home.join("mcp/panel_mcp.py").is_file() {
             return;
         }
-        let launch = codex_args(&home, 4321, "codex-1");
+        let launch = codex_args(&home, 4321, "codex-1", Role::Worker);
         let joined = launch.args.join(" ");
         assert!(joined.contains("mcp_servers.appgea-panel.command"));
         assert!(joined.contains("PANEL_INSTANCE"));
@@ -308,9 +342,9 @@ mod tests {
         // The fallback is what makes screenshots reach the Inbox from an engine whose MCP is
         // missing, sandboxed, or simply never wired — it must not be grok-only.
         for rule in [
-            agent_args(&home, 1, "i").args.join(" "),
-            codex_args(&home, 1, "i").args.join(" "),
-            grok_args(&home).args.join(" "),
+            agent_args(&home, 1, "i", Role::Worker).args.join(" "),
+            codex_args(&home, 1, "i", Role::Worker).args.join(" "),
+            grok_args(&home, Role::Worker).args.join(" "),
         ] {
             assert!(
                 rule.contains("panel_send.py"),
@@ -321,12 +355,25 @@ mod tests {
     }
 
     #[test]
+    fn the_manager_is_never_told_it_is_a_worker() {
+        let home = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../../host");
+        for rule in [
+            agent_args(&home, 1, "i", Role::Manager).args.join(" "),
+            codex_args(&home, 1, "i", Role::Manager).args.join(" "),
+            grok_args(Path::new("/nonexistent"), Role::Manager).args.join(" "),
+        ] {
+            assert!(rule.contains("You are the Manager"), "manager lost its identity: {rule}");
+            assert!(!rule.contains("worker inside Panel"), "manager told it is a worker: {rule}");
+        }
+    }
+
+    #[test]
     fn grok_gets_sender_rule_without_global_config() {
         let home = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../../host");
         if !home.join("panel_send.py").is_file() {
             return;
         }
-        let launch = grok_args(&home);
+        let launch = grok_args(&home, Role::Worker);
         assert_eq!(launch.args.first().map(String::as_str), Some("--rules"));
         assert!(launch.args.join(" ").contains("panel_send.py"));
     }

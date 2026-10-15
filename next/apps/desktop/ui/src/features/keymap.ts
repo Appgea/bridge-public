@@ -53,6 +53,7 @@ export type ActionId =
   | "tab.prev"
   | "term.next"
   | "term.prev"
+  | "term.waiting"
   | "term.zoom"
   | "term.fullscreen"
   | "term.unzoom"
@@ -211,7 +212,7 @@ export const ACTIONS: ActionDef[] = [
     id: "tab.next",
     group: "Tabs",
     name: "Next tab",
-    note: "Walk the strip right, wrapping. On a project it walks the module rail instead",
+    note: "Walk the strip right, wrapping. Tabs layout: the terminal tabs of the second row. On a project, the module rail",
     mac: "Meta+Shift+BracketRight",
     other: "Ctrl+Shift+BracketRight",
   },
@@ -219,7 +220,7 @@ export const ACTIONS: ActionDef[] = [
     id: "tab.prev",
     group: "Tabs",
     name: "Previous tab",
-    note: "Walk the strip left, wrapping. On a project, the module rail",
+    note: "Walk the strip left, wrapping. Tabs layout: the second row. On a project, the module rail",
     mac: "Meta+Shift+BracketLeft",
     other: "Ctrl+Shift+BracketLeft",
   },
@@ -227,7 +228,7 @@ export const ACTIONS: ActionDef[] = [
     id: "term.next",
     group: "Terminals",
     name: "Next terminal",
-    note: "Caret to the next terminal in this tab, in join order",
+    note: "Caret to the next terminal in this tab, in join order. Tabs layout: the next top tab",
     mac: "Ctrl+Tab",
     other: "Ctrl+Tab",
   },
@@ -235,17 +236,25 @@ export const ACTIONS: ActionDef[] = [
     id: "term.prev",
     group: "Terminals",
     name: "Previous terminal",
-    note: "Caret back one, same order",
+    note: "Caret back one, same order. Tabs layout: the previous top tab",
     mac: "Ctrl+Shift+Tab",
     other: "Ctrl+Shift+Tab",
+  },
+  {
+    id: "term.waiting",
+    group: "Terminals",
+    name: "Next waiting agent",
+    note: "Go to the agent that has waited on you longest, in any tab or project. Press again for the next one. A finished turn you have not seen counts after the open questions",
+    mac: "Meta+Shift+KeyA",
+    other: "Ctrl+Shift+KeyA",
   },
   {
     id: "term.select",
     group: "Terminals",
     name: "Terminal 1…9",
-    note: "Go to that terminal of this tab: its seat on the grid, or its tab in the second row",
+    note: "Go to that terminal of this tab on the grid. Tabs layout: that top tab, since ⌘1…9 goes to the terminal",
     digits: true,
-    mac: "Alt+Digit1",
+    mac: "Meta+Ctrl+Digit1",
     other: "Alt+Shift+Digit1",
   },
   {
@@ -451,6 +460,17 @@ export const matches = (event: KeyboardEvent, id: ActionId): boolean => {
     return false;
   }
   return def.digits ? /^Digit[1-9]$/.test(event.code) : event.code === chord.code;
+};
+
+/** Keys that type a character. With ⌥ alone held, macOS types a character on them instead:
+ *  ⌥3 is # and ⌥8 is [ on Turkish Q, ⌥[ is [ on Bulgarian. A chord there steals that character
+ *  from every terminal and editor in Panel. */
+const TYPING_CODE = /^(Key[A-Z]|Digit\d|Backquote|Minus|Equal|BracketLeft|BracketRight|Backslash|Semicolon|Quote|Comma|Period|Slash|IntlBackslash|Space)$/;
+
+/** True when this action's chord would eat a character some keyboard layout types with it. */
+export const typesText = (id: ActionId): boolean => {
+  const chord = chordOf(id);
+  return IS_MAC && chord.alt && !chord.meta && !chord.ctrl && (!!BY_ID.get(id)?.digits || TYPING_CODE.test(chord.code));
 };
 
 /** Which digit a digit-family event carried, 1…9, or null. */

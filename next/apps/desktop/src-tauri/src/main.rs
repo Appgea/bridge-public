@@ -1288,10 +1288,11 @@ async fn open_session(
 
     if kind != "shell" {
         let port = state.ingress.port();
+        let role = if project == CPO_ID { launch::Role::Manager } else { launch::Role::Worker };
         let mut wiring = match kind.as_str() {
-            "claude" => launch::agent_args(&state.panel_home, port, &instance),
-            "codex" => launch::codex_args(&state.panel_home, port, &instance),
-            "grok" => launch::grok_args(&state.panel_home),
+            "claude" => launch::agent_args(&state.panel_home, port, &instance, role),
+            "codex" => launch::codex_args(&state.panel_home, port, &instance, role),
+            "grok" => launch::grok_args(&state.panel_home, role),
             _ => launch::AgentLaunch { args: Vec::new() },
         };
         wiring.args.extend(skill_sessions::launch_args(&session_id, &kind, &start_in)?);

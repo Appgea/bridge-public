@@ -32,13 +32,16 @@
  *   ^F does the same as ⌘↩ — the key that fullscreens a terminal on a project screen, which
  *     used to be dead on the one screen made entirely of terminals
  *   ⌘⌥1…9 send the focused terminal to that tab of the strip · ⌘⌥T to a tab of its own
- *   ⌥1…9 go to that terminal of this tab · ⌘⇧L flip between the two layouts
+ *   ⌃⌘1…9 go to that terminal of this tab · ⌘⇧L flip between the two layouts
+ *   ⌘⇧A the next agent waiting on you, in any tab
  *
  * Two layouts, chosen in Settings or with ⌘⇧L. GRID is the wall above. TABS keeps the strip as
  * the top row, the containers, and adds a second row with one tab per terminal of the active
  * container. Only that terminal is on screen, at full size. The ⌘⌥ arrows move over the two rows
- * like a grid: ←/→ walk the terminal tabs, ↑/↓ walk the top tabs. Ctrl+Tab and ⌥digits walk the
- * second row too; everything else means the same in both.
+ * like a grid: ←/→ walk the terminal tabs, ↑/↓ walk the top tabs. The second row is where you
+ * work, so it gets the ⌘ chords: ⌘⇧[ ] walks it and ⌘1…9 jumps in it. The top row trades them
+ * for the terminal chords: ⌃Tab walks it and ⌃⌘1…9 jumps in it. Everything else means the same
+ * in both.
  *
  * An agent's report arrives as a NOTICE lying over the top of the wall — the agent's words and
  * its pictures, at a size you can read, taking no seat in the grid. Tap its head to fold it
@@ -221,6 +224,9 @@ export type TerminalsHandle = {
   select(at: number): boolean;
   /** How many tabs the strip has, pinned included — the ⌘-digit ladder's upper bound. */
   count(): number;
+  /** ⌘1…9 while the tabs layout's second row is up: show that terminal of the row. False when
+   *  there is no such row, and the digit belongs to the strip. */
+  digit(at: number): boolean;
   /** Which pinned tab is up, or null while a terminal tab is. */
   pinnedAt(): number | null;
   /** Close an empty active tab, otherwise the focused terminal (or first visible tile). */
@@ -228,6 +234,10 @@ export type TerminalsHandle = {
   /** Which project the keyboard is aimed at — the project of the focused terminal. Null on a
    *  pinned tab or an empty wall. ⌘R reads this to know whose app to run. */
   focusedProject(): string | null;
+  /** The terminal the keyboard is aimed at. Null on a pinned tab or an empty wall. */
+  focusedSession(): string | null;
+  /** Bring a terminal up: switch to the tab that holds it, then show it. False when no tab does. */
+  reveal(sessionId: string): boolean;
   /** Hand the build bar its truth. Called on every run-state change, open or not. */
   setRuns(runs: LiveRun[]): void;
   /** A project changed company. Move its terminals to the new company's tab, so the strip is not
@@ -765,6 +775,19 @@ export function mountTerminals(host: HTMLElement, events: TerminalsEvents): Term
 
   const tabbed = (): boolean => termLayout() === "tabs";
 
+  /** The tabs layout's second row is on screen with terminals in it. While it is, the chords you
+   *  work with — ⌘⇧[ ] and ⌘1…9 — walk that row. ⌃Tab and ⌃⌘1…9 take the top row instead. */
+  const rowUp = (): boolean =>
+    tabbed() && activePinned === null && activeSessions(snapshot).length > 0;
+
+  /** The chord that opens this strip tab: ⌘N, or ⌃⌘N in the tabs layout, where ⌘N is a terminal. */
+  const stripKey = (stripIndex: number): string =>
+    !tabbed()
+      ? chordFor(stripIndex)
+      : stripIndex <= 8
+        ? chordLabel({ ...chordOf("term.select"), code: `Digit${stripIndex + 1}` })
+        : "";
+
   /**
    * The one terminal the tabs layout shows: the tab's remembered one, else its first. Null while
    * the ＋ picker has the stage, or the tab is empty.
@@ -1184,6 +1207,21 @@ export function mountTerminals(host: HTMLElement, events: TerminalsEvents): Term
       act();
     };
 
+    // Tabs layout: the two rows trade chords. ⌘⇧[ ] walks the terminals you work in, and ⌃Tab
+    // and ⌃⌘1…9 take over the tabs above. With no second row up — a pinned tab, an empty tab —
+    // ⌘⇧[ ] falls through to the strip, so it still gets you off one.
+    if (tabbed()) {
+      if (rowUp() && matches(event, "tab.next")) return run(() => cycleTerminal(1));
+      if (rowUp() && matches(event, "tab.prev")) return run(() => cycleTerminal(-1));
+      if (matches(event, "term.prev")) return run(() => stepStrip(-1));
+      if (matches(event, "term.next")) return run(() => stepStrip(1));
+      if (matches(event, "term.select")) {
+        const digit = digitOf(event);
+        if (!digit || digit > stripCount()) return;
+        return run(() => void selectStrip(digit - 1));
+      }
+    }
+
     // Strip-level chords work from a pinned tab too — they are how you get off one.
     if (matches(event, "tab.next")) return run(() => stepStrip(1));
     if (matches(event, "tab.prev")) return run(() => stepStrip(-1));
@@ -1370,7 +1408,7 @@ export function mountTerminals(host: HTMLElement, events: TerminalsEvents): Term
     button.className = `terms-tab terms-tab-pinned${on ? " is-active" : ""}`;
     button.setAttribute("role", "tab");
     button.setAttribute("aria-selected", String(on));
-    const chord = chordFor(index);
+    const chord = stripKey(index);
     button.title = `${entry.name}${chord ? ` — ${chord}` : ""}`;
     const glyph = make("i", "terms-tab-ico");
     glyph.setAttribute("aria-hidden", "true");
@@ -1453,7 +1491,7 @@ export function mountTerminals(host: HTMLElement, events: TerminalsEvents): Term
       button.className = `terms-tab${on ? " is-active" : ""}`;
       button.setAttribute("role", "tab");
       button.setAttribute("aria-selected", String(on));
-      const chord = chordFor(index + pinnedCount());
+      const chord = stripKey(index + pinnedCount());
       button.title = `${tab.name}${chord ? ` — ${chord}` : ""} · double-click to rename`;
       button.dataset.tab = tab.id;
       const label = make("span", "terms-tab-name");
@@ -1571,7 +1609,7 @@ export function mountTerminals(host: HTMLElement, events: TerminalsEvents): Term
   };
 
   /** Drag a terminal tab along its row to change the order. The order is the tab's join order,
-   *  so the grid's seats and the ⌥ digits follow it too. */
+   *  so the grid's seats and the ⌃⌘ digits follow it too. */
   const reorder = (sessionId: string, target: string, after: boolean): void => {
     const tab = currentTab();
     if (sessionId === target || !tab.sessionIds.has(sessionId) || !tab.sessionIds.has(target)) return;
@@ -1620,7 +1658,7 @@ export function mountTerminals(host: HTMLElement, events: TerminalsEvents): Term
 
   /**
    * The second row of the tabs layout. One tab per terminal of the active tab, in join order:
-   * state dot, app icon, project, the terminal's tag, and its ⌥ digit. Click shows it, middle-click
+   * state dot, app icon, the terminal's tag, and its ⌘ digit. Click shows it, middle-click
    * or × closes it, double-click renames it, drag reorders it or drops it on a tab of the top row.
    */
   const paintTermBar = (): void => {
@@ -1630,7 +1668,6 @@ export function mountTerminals(host: HTMLElement, events: TerminalsEvents): Term
       return;
     }
     const shown = shownId();
-    const select = chordOf("term.select");
     const ordered = activeSessions(snapshot);
     const projectOf = new Map(ordered.map(({ p, session }) => [session.id, p.id]));
     // Two shells in one project both say "Shell" — number the repeats so each tab is its own.
@@ -1646,21 +1683,26 @@ export function mountTerminals(host: HTMLElement, events: TerminalsEvents): Term
       const on = session.id === shown;
       const tab = document.createElement("div");
       // k-* gives the tab its engine's hue, the same classes the project screen's strip uses.
-      tab.className = `term-ttab k-${session.kind}${on ? " is-active" : ""}`;
+      // A thin rule where one project's run of tabs ends and the next begins. The app icon in
+      // each tab says which project; a caption cell per project cost a whole column each.
+      const starts = index > 0 && ordered[index - 1].p.id !== p.id;
+      tab.className = `term-ttab k-${session.kind}${on ? " is-active" : ""}${starts ? " is-group-start" : ""}`;
       tab.dataset.session = session.id;
       tab.setAttribute("role", "tab");
       tab.setAttribute("aria-selected", String(on));
       tab.tabIndex = -1;
-      const key = index < 9 ? chordLabel({ ...select, code: `Digit${index + 1}` }) : "";
+      const key = chordFor(index);
       tab.dataset.project = p.id;
       tab.title = `${p.name} — ${labels[index]}${key ? ` · ${key}` : ""} · double-click to rename · drag to reorder or onto a tab above`;
 
       // One dot: the engine's hue at rest, pulsing while it works, amber while it waits on you.
       const dot = make("i", "term-ttab-dot");
       dot.setAttribute("aria-hidden", "true");
+      const ico = projectIcon(p);
+      ico.classList.add("term-ttab-ico");
       const label = make("span", "term-ttab-tag");
       label.textContent = labels[index];
-      tab.append(dot, label);
+      tab.append(dot, ico, label);
       const close = make("button", "term-ttab-close");
       (close as HTMLButtonElement).type = "button";
       close.setAttribute("aria-label", `close ${p.name} terminal`);
@@ -1734,39 +1776,14 @@ export function mountTerminals(host: HTMLElement, events: TerminalsEvents): Term
     add.addEventListener("click", () => openPicker());
 
     // The keys live in tooltips, not as words on the row: the row is for terminals.
+    const walk = pairLabel(chordText("tab.prev"), chordText("tab.next"));
     const across = pairLabel(chordText("term.focusLeft"), chordText("term.focusRight"));
     const down = pairLabel(chordText("term.focusUp"), chordText("term.focusDown"));
+    const above = pairLabel(chordText("term.prev"), chordText("term.next"));
     termBar.title =
-      `${across} walk these terminals · ${down} the tabs above · ` +
-      `${chordText("term.next")} also walks terminals · ${chordText("term.select")} jumps to one`;
+      `${walk} or ${across} walk these terminals · ${chordFor(0).slice(0, -1)}1…9 jumps to one · ` +
+      `${above} or ${down} walk the tabs above · ${chordText("term.select")} jumps to one`;
     const filler = make("span", "term-ttabs-fill");
-    // A project caption before each run of its terminals, then the tabs. The row is a grid so
-    // every tab gets the same width whatever its label says: equal tabs read as one calm row,
-    // and the captions sit between them at their own natural size.
-    const items: HTMLElement[] = [];
-    const columns: string[] = [];
-    ordered.forEach(({ p, session }, index) => {
-      if (ordered[index - 1]?.p.id !== p.id) {
-        const head = make("span", "term-tgroup-head");
-        head.dataset.project = p.id;
-        head.classList.toggle("is-first", index === 0);
-        head.title = `${p.name} — click for its first terminal`;
-        head.textContent = p.name;
-        head.addEventListener("click", () => showTerminal(session.id));
-        items.push(head);
-        columns.push("auto");
-      }
-      if (session.id === shown) items.at(-1)?.classList.add("is-active");
-      items.push(cells[index]);
-      columns.push("minmax(120px, 200px)");
-    });
-    // The shown terminal's caption lights with it, wherever it sits in the run.
-    const shownProject = ordered.find(({ session }) => session.id === shown)?.p.id;
-    for (const item of items) {
-      if (item.classList.contains("term-tgroup-head")) {
-        item.classList.toggle("is-active", item.dataset.project === shownProject);
-      }
-    }
     // The tabs layout hides the tile head, so its one tool worth keeping moves up here.
     const extras: HTMLElement[] = [];
     const current = ordered.find(({ session }) => session.id === shown);
@@ -1783,8 +1800,11 @@ export function mountTerminals(host: HTMLElement, events: TerminalsEvents): Term
       skills.addEventListener("click", () => events.skills?.(current.session.id));
       extras.push(skills);
     }
+    // The row is a grid so every tab gets the same width whatever its label says: equal tabs
+    // read as one calm row.
+    const columns = cells.map(() => "minmax(120px, 200px)");
     termBar.style.gridTemplateColumns = [...columns, "auto", "1fr", ...extras.map(() => "auto")].join(" ");
-    termBar.replaceChildren(...items, add, filler, ...extras);
+    termBar.replaceChildren(...cells, add, filler, ...extras);
     paintTermBarStates();
     // Keep the shown tab in view when the row overflows.
     termBar.querySelector<HTMLElement>(".term-ttab.is-active")?.scrollIntoView({ block: "nearest", inline: "nearest" });
@@ -3214,6 +3234,19 @@ export function mountTerminals(host: HTMLElement, events: TerminalsEvents): Term
       return visibleSessions().find(({ session }) => session.id === target)?.p.id ?? null;
     },
 
+    focusedSession() {
+      return openState && activePinned === null ? aimed() : null;
+    },
+
+    reveal(sessionId) {
+      if (!openState) return false;
+      const at = tabs.findIndex((tab) => tab.sessionIds.has(sessionId));
+      if (at < 0) return false;
+      switchTab(at);
+      showTerminal(sessionId);
+      return true;
+    },
+
     setRuns(next) {
       runs = next;
       paintRunBar();
@@ -3250,6 +3283,13 @@ export function mountTerminals(host: HTMLElement, events: TerminalsEvents): Term
     select: (at) => (openState ? selectStrip(at) : false),
 
     count: stripCount,
+    digit: (at) => {
+      if (!openState || !rowUp()) return false;
+      // Bounds are the row's: with three terminals, ⌘6 is nobody's, not the strip's sixth tab.
+      const target = activeSessions(snapshot)[at];
+      if (target) showTerminal(target.session.id);
+      return true;
+    },
 
     pinnedAt: () => (openState ? activePinned : null),
 

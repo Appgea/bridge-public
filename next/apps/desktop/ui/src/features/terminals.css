@@ -1736,9 +1736,9 @@
   position: relative;
   min-width: 0;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: auto auto minmax(0, 1fr) auto;
   align-items: center;
-  gap: 8px;
+  gap: 7px;
   padding: 0 6px 0 12px;
   border-top: 2px solid transparent;
   box-shadow: inset -1px 0 0 var(--line-soft);
@@ -1810,26 +1810,15 @@
 .term-ttab:not(.is-active):not(:hover) .term-ttab-close { visibility: hidden; }
 .term-ttab-close:hover { transform: none; color: var(--risk); background: color-mix(in oklab, var(--risk) 14%, transparent); }
 
-/* A project's name, once, before its run of tabs: the faint small-caps label the project screen
-   uses for its NEW row. */
-.term-tgroup-head {
-  display: flex;
-  align-items: center;
-  padding: 0 12px;
-  /* A grid track may shrink an ellipsed label to nothing; a project name is never cut. */
-  min-width: max-content;
-  white-space: nowrap;
-  box-shadow: inset -1px 0 0 var(--line-soft);
-  font-size: var(--text-xs);
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--ink-faint);
-  cursor: pointer;
-  user-select: none;
+/* Which project, at a glance, without a caption column per project. */
+.term-ttab-ico.plus-ico {
+  width: 16px; height: 16px;
+  border-radius: 4px;
+  font-size: 9px;
 }
-.term-tgroup-head:not(.is-first) { box-shadow: inset 1px 0 0 var(--line), inset -1px 0 0 var(--line-soft); }
-.term-tgroup-head:hover,
-.term-tgroup-head.is-active { color: var(--ink-dim); }
+.term-ttab:not(.is-active) .term-ttab-ico { opacity: 0.8; }
+/* Where one project's run of tabs ends and the next begins. */
+.term-ttab.is-group-start { box-shadow: inset 1px 0 0 var(--line), inset -1px 0 0 var(--line-soft); }
 
 .term-ttab-add {
   width: 38px;

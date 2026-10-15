@@ -639,7 +639,8 @@ export function mountChat(host: HTMLElement, events: ChatEvents, cpo: CpoEvents)
     description.textContent = reports
       ? "Agent updates from every project. Reply in the agent's terminal."
       : "Plan work and brief your agents.";
-    hideButton.title = `Close ${section} (Esc)`;
+    // Esc belongs to the manager's agent while you are typing to it, so ⌘W is the key that always closes.
+    hideButton.title = `Close ${section} (${reports ? "Esc" : "⌘W"})`;
     hideButton.setAttribute("aria-label", `Close ${section}`);
     searchToggle.hidden = !reports;
     promptToggle.hidden = reports;

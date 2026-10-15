@@ -24,6 +24,7 @@ import {
   chordFromEvent,
   chordLabel,
   clashes,
+  typesText,
   isCustom,
   isModifierOnly,
   label,
@@ -224,8 +225,13 @@ export function mountSettings(host: HTMLElement, events: SettingsEvents): Settin
 
   /** One shortcut: name, chord, and a reset only once it differs from the default. */
   const keyRow = (def: ActionDef, clashing: boolean): HTMLElement => {
-    const row = make("div", `set-row set-key${clashing ? " is-clash" : ""}`);
-    row.title = clashing ? `${def.note} — this chord is bound twice` : def.note;
+    const typing = typesText(def.id);
+    const row = make("div", `set-row set-key${clashing || typing ? " is-clash" : ""}`);
+    row.title = clashing
+      ? `${def.note} — this chord is bound twice`
+      : typing
+        ? `${def.note} — ⌥ with this key types a character on some keyboard layouts, so Panel would eat it`
+        : def.note;
     row.append(line("span", "set-row-name", def.name));
 
     const reset = button("set-reset", "↺");

@@ -190,6 +190,15 @@ const working = new Set<string>();
  * quiet, and a shell is always absent: it never speaks a status in its life.
  */
 const sessionPhase = new Map<string, "work" | "ask">();
+/** When each session began waiting on you. ⌘⇧A visits the longest wait first. */
+const askSince = new Map<string, number>();
+/** The only writer of sessionPhase, so a wait's start time can never outlive the wait. */
+function setPhase(sessionId: string, phase: "work" | "ask" | null): void {
+  if (phase !== "ask") askSince.delete(sessionId);
+  else if (sessionPhase.get(sessionId) !== "ask") askSince.set(sessionId, Date.now());
+  if (phase) sessionPhase.set(sessionId, phase);
+  else sessionPhase.delete(sessionId);
+}
 
 /* ------------------------------------------------------------------ attention
  * "Which agent needs me" is the question Panel exists to answer. Two states answer it, and the
@@ -231,7 +240,7 @@ function markSeen(id: string): void {
  *  ask does not: only its own answer or timeout ends it. */
 function endPermissionWait(id: string, sessionId: string): void {
   if (sessionPhase.get(sessionId) !== "ask" || askTray.sessionAsking(sessionId)) return;
-  sessionPhase.set(sessionId, "work");
+  setPhase(sessionId, "work");
   setStatus(id, "working");
 }
 /** True while ANY project has a live (non-exited) session. */
@@ -839,7 +848,7 @@ async function closeSession(sessionId: string): Promise<void> {
     here.sessions = here.sessions.filter((candidate) => candidate.id !== sessionId);
     exited.delete(sessionId);
     working.delete(sessionId);
-    sessionPhase.delete(sessionId);
+    setPhase(sessionId, null);
     here.workBySession.delete(sessionId);
     deck.remove(sessionId);
     here.running = here.sessions.some((candidate) => isAgentKind(candidate.kind) && !exited.has(candidate.id));
@@ -1409,6 +1418,38 @@ function stopFocusedApp(): void {
   if (live.length === 1) void runner.stopProject(live[0].project);
 }
 
+/** Every agent waiting on you, longest first: open questions and permission prompts, then
+ *  turns that finished out of sight. Same two states as the rail's attention, one per session. */
+function waitingSessions(): Session[] {
+  const asking = [...askSince.entries()]
+    .filter(([id]) => sessionPhase.get(id) === "ask")
+    .sort((a, b) => a[1] - b[1])
+    .map(([id]) => sessionById(id))
+    .filter((session): session is Session => !!session);
+  const finished = [...doneUnseen]
+    .map((projectId) => reviewAgent(projectId))
+    .filter((session): session is Session => !!session && !asking.some((s) => s.id === session.id));
+  return [...asking, ...finished];
+}
+
+/** ⌘⇧A: the next agent waiting on you. Pressed on one that waits, it moves past it, so repeated
+ *  presses walk the whole queue. The wall keeps you on the wall; anywhere else opens the project. */
+function goWaiting(): void {
+  const queue = waitingSessions();
+  if (!queue.length) return;
+  const here = terminalsActive
+    ? terminals.focusedSession()
+    : active && !offProject()
+      ? (state(active)?.activeSession ?? null)
+      : null;
+  const next = queue[(queue.findIndex((session) => session.id === here) + 1) % queue.length];
+  if (terminalsActive && terminals.reveal(next.id)) {
+    markSeen(next.project);
+    return;
+  }
+  jumpToSession(next.project, next.id);
+}
+
 function sessionById(id: string): Session | null {
   for (const here of states.values()) {
     const session = here.sessions.find((candidate) => candidate.id === id);
@@ -1442,7 +1483,7 @@ function showSkills(sessionId: string | null = null): void {
         here.sessions = here.sessions.map((candidate) => candidate.id === session.id ? next : candidate);
         exited.delete(session.id);
         working.delete(session.id);
-        sessionPhase.delete(session.id);
+        setPhase(session.id, null);
         here.workBySession.delete(session.id);
         deck.add(next.id, next.terminal_id);
         jumpToSession(next.project, next.id);
@@ -3080,10 +3121,10 @@ function onEvent(event: ProjectEvent): void {
       // "waiting"/"asking" is still mid-turn — the agent has not handed control back yet.
       if (/^(idle|done|complete|error|failed)$/.test(event.status)) {
         working.delete(event.session_id);
-        sessionPhase.delete(event.session_id);
+        setPhase(event.session_id, null);
       } else {
         working.add(event.session_id);
-        sessionPhase.set(
+        setPhase(
           event.session_id,
           /^(waiting|asking)$/.test(event.status) ? "ask" : "work",
         );
@@ -3228,7 +3269,7 @@ function onEvent(event: ProjectEvent): void {
     case "ask_requested": {
       // The agent's tool call is parked on a socket until this is answered or times out.
       const headline = String(event.spec.title ?? event.spec.prompt ?? event.spec.ask ?? "needs your answer");
-      sessionPhase.set(event.session_id, "ask");
+      setPhase(event.session_id, "ask");
       askTray.open(id, event.session_id, event.qid, event.spec);
       setStatus(id, "asking", headline);
       signalAttention({ title: `${state(id)!.project.name} needs you`, body: headline, urgent: true });
@@ -3238,14 +3279,14 @@ function onEvent(event: ProjectEvent): void {
     case "ask_resolved":
       askTray.close(event.qid);
       if (sessionPhase.get(event.session_id) === "ask" && !askTray.sessionAsking(event.session_id)) {
-        sessionPhase.set(event.session_id, "work");
+        setPhase(event.session_id, "work");
         setStatus(id, "working");
       }
       break;
 
     case "turn_finished":
       working.delete(event.session_id);
-      sessionPhase.delete(event.session_id);
+      setPhase(event.session_id, null);
       setStatus(id, "idle", event.summary);
       state(id)?.workshop.setPhase(event.success ? "done" : "error", event.summary);
       if (!lookingAt(id)) {
@@ -3361,7 +3402,7 @@ async function boot(): Promise<void> {
       chat.noteExit(sessionId);
       sprint?.sync();
       working.delete(sessionId);
-      sessionPhase.delete(sessionId);
+      setPhase(sessionId, null);
       const owner = [...states.values()].find((here) =>
         here.sessions.some((s) => s.id === sessionId),
       );
@@ -3540,6 +3581,9 @@ async function boot(): Promise<void> {
         !event.altKey &&
         !event.shiftKey;
       if (!escape && !closeChord) return;
+      // The manager is an agent in a terminal, and Esc is how you interrupt an agent. While its
+      // terminal has the caret, Esc goes to the agent. ⌘W, ⌘⇧M and × still close the screen.
+      if (escape && (event.target as Element | null)?.closest?.(".cpo-term")) return;
       chat.hide();
       event.preventDefault();
       event.stopImmediatePropagation();
@@ -3767,7 +3811,8 @@ async function boot(): Promise<void> {
 
   // ⌘1…⌘9 — the strip you are looking at, one for one, from inside a terminal too (capture
   // phase beats xterm). On the wall that is the workspace strip: ⌘1 Runs, ⌘2 the first terminal
-  // tab. On a project it is Work's file slots. Two strips, one ladder, and ⌘J walks between
+  // tab. In the tabs layout the second row of terminals takes the digits while it is up, and the
+  // strip moves to ⌃⌘1…9. On a project it is Work's file slots. Two strips, one ladder, and ⌘J walks between
   // them — the digits never leave the screen you are on. Home, Settings, Chat and the notebook
   // own no digit. A digit past the last rung does nothing rather than landing you on a
   // neighbour you did not ask for. ⌘1 is the app fallback: when this screen has no first
@@ -3782,8 +3827,11 @@ async function boot(): Promise<void> {
       if (!/^[1-9]$/.test(event.key)) return;
       const at = Number(event.key) - 1;
       if (terminalsActive) {
-        // A single-project Panel has no portfolio to jump across.
-        if (document.body.classList.contains("single-project")) {
+        // The tabs layout's second row takes the digits while it is up; terminals.ts decides.
+        if (terminals.digit(at)) {
+          // handled
+        } else if (document.body.classList.contains("single-project")) {
+          // A single-project Panel has no portfolio to jump across.
           if (at !== 0) return;
           showTerminals(TAB_WALL);
         } else {
@@ -3823,6 +3871,7 @@ async function boot(): Promise<void> {
       if (chordMatches(event, "app.work")) return go(() => void goSection("files"));
       if (chordMatches(event, "app.git")) return go(() => void goSection("git"));
       if (chordMatches(event, "app.dash")) return go(() => void goSection("dash"));
+      if (chordMatches(event, "term.waiting")) return go(goWaiting);
       // The wall answers these itself while it is up (terminals.ts); here they walk the rail.
       if (offProject() || !active) return;
       if (chordMatches(event, "tab.next")) return go(() => stepRail(1));
