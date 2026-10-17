@@ -1931,17 +1931,25 @@ async fn start_sim(
                     let terminal_id = session.terminal_id.clone();
                     let meta = state.sims.lock().unwrap().remove(&session_id);
                     let closing = state.terminals.lock().unwrap().take(&terminal_id);
-                    if let Some(closing) = closing {
-                        off_main(move || Ok(closing.end())).await?;
-                    }
+                    let ended = match closing {
+                        Some(closing) => off_main(move || Ok(closing.end())).await,
+                        None => Ok(()),
+                    };
                     // Handed back only now that the old process is gone: the lease must be free at
                     // the moment we re-take it, and not a moment while the corpse still holds it.
+                    // The run is already untracked, so a failed reap still pays what it owed:
+                    // nothing else would ever release this lease or shut this device.
                     if let Some(meta) = meta {
                         leases::release_owner(&meta.owner);
                         if meta.booted_by_us && !meta.device_id.is_empty() {
-                            inherited = Some((meta.address, meta.device_id));
+                            if ended.is_err() {
+                                release_device(&meta.address, &meta.device_id);
+                            } else {
+                                inherited = Some((meta.address, meta.device_id));
+                            }
                         }
                     }
+                    ended?;
                     state.sessions.lock().unwrap().remove(&session_id);
                     event_sink(&app)(sim::status_event(
                         &project,
@@ -2182,9 +2190,6 @@ async fn start_sim(
             return;
         }
         if let Some((next, ms)) = sim::parse_status(&data) {
-            // Only the first "running" of an explicitly started run raises Simulator. A hot
-            // reload or restart must never steal focus: the human is typing somewhere else, and
-            // a window that jumps in front on every file save is a hijack, not a courtesy.
             // The first "running" of an explicitly started run puts its result in front of the
             // human — the Simulator window for a device run, the page for a server. A hot reload
             // or restart must never do it again: the human is typing somewhere else, and a window
