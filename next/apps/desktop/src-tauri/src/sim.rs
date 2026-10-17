@@ -7,8 +7,8 @@
 //!   2. hands `panel-terminal` the argv to run (Flutter or a native app),
 //!   3. watches the PTY output for lifecycle lines and turns them into `VisualRequested{view:"sim"}`
 //!      status events (the same string-routed path git moments already use), and
-//!   4. brings the Simulator window to the front on launch and whenever a reload lands — whether
-//!      the reload came from the dashboard button OR from someone typing `r` in the terminal.
+//!   4. brings the run's own simulator to the front once, when the app first reaches it.
+//!      Output alone never raises it again: a hot reload typed elsewhere must not steal focus.
 //!
 //! Reload is not a signal or a pid-file here: the process lives in a real PTY, so a reload is
 //! literally a write of "r" to that PTY (`write_terminal`), and `R` is a hot restart.
@@ -428,7 +428,8 @@ pub fn uninstall_app(udid: &str, root: &Path) {
         .output();
 }
 
-/// Boot the device if it isn't already, and bring the Simulator UI up.
+/// Boot the device if it isn't already. Headless: the window comes up once, when the app is
+/// running (`focus_simulator`). Raising it here too stole focus at the start of every build.
 pub fn ensure_booted(udid: &str) -> Result<(), String> {
     // A device-less run (Godot on the desktop) has no simulator to boot.
     if udid.is_empty() {
@@ -443,29 +444,37 @@ pub fn ensure_booted(udid: &str) -> Result<(), String> {
     if !out.status.success() && !stderr.contains("current state: Booted") {
         return Err(stderr.trim().to_string());
     }
-    focus_simulator();
     Ok(())
 }
 
-/// Bring the simulator window to the front. Non-blocking: the actual `open` runs on a throwaway
-/// thread so a caller on the PTY reader thread is never stalled, and the children get reaped.
+/// Bring THIS simulator to the front. Non-blocking: the actual `open` runs on a throwaway thread
+/// so a caller on the PTY reader thread is never stalled, and the children get reaped.
 ///
-/// Xcode 27 dropped Simulator.app for DeviceHub (`com.apple.dt.Devices`). `open -a Simulator`
-/// then fails, and since nothing read its status the run looked live with no window to see it
-/// in. Older Xcodes still ship Simulator.app, so it is tried first and DeviceHub only when it is
-/// not there. `open` activates what it opens, so no separate activate is needed.
-pub fn focus_simulator() {
-    std::thread::spawn(|| {
-        let opened = crate::platform::command("open")
-            .args(["-a", "Simulator"])
-            .status()
-            .map(|s| s.success())
-            .unwrap_or(false);
-        if !opened {
-            let _ = crate::platform::command("open")
-                .args(["-b", "com.apple.dt.Devices"])
-                .status();
+/// Xcode 27 dropped Simulator.app for DeviceHub (`com.apple.dt.Devices`). Opening DeviceHub alone
+/// shows whichever device it showed last, so a run on one simulator raised a powered-off window
+/// of another. `devices://manage/select?id=<udid>` selects the device in DeviceHub's one main
+/// window. Its sibling `devices://device/open` opens a window per device instead, and each one
+/// stays open on a powered-off frame long after its run ended. Older Xcodes have no `devices:`
+/// handler, `open` fails on it, and Simulator.app is the fallback. An empty udid raises the app.
+pub fn focus_simulator(udid: &str) {
+    let udid = udid.to_string();
+    std::thread::spawn(move || {
+        let open = |args: &[&str]| {
+            crate::platform::command("open")
+                .args(args)
+                .status()
+                .map(|status| status.success())
+                .unwrap_or(false)
+        };
+        // A udid is hex and dashes. Anything else is not ours to put in a URL.
+        let udid_ok = !udid.is_empty() && udid.chars().all(|c| c.is_ascii_hexdigit() || c == '-');
+        if udid_ok && open(&[&format!("devices://manage/select?id={udid}")]) {
+            return;
         }
+        if open(&["-a", "Simulator"]) {
+            return;
+        }
+        let _ = open(&["-b", "com.apple.dt.Devices"]);
     });
 }
 

@@ -769,16 +769,26 @@ fn prepare_target(
         "android" => android::boot(&target.id).map(Some),
         _ => Ok(None),
     };
+    // A start that fails from here on hands back the lease and the device it booted, the same
+    // as a debug session that ends. Releasing only the lease left that simulator up for good.
+    let abandon = |target: &targets::Target| {
+        cleanup_resource(Some(&DebugResource {
+            owner: owner.clone(),
+            address: target.id.clone(),
+            device_id: target.device.clone(),
+            booted_by_us,
+        }))
+    };
     match boot {
         Ok(Some(serial)) => target.device = serial,
         Ok(None) => {}
         Err(error) => {
-            leases::release_owner(&owner);
+            abandon(&target);
             return Err(error);
         }
     }
     if kind == "native" && !matches!(target.family.as_str(), "iphone" | "ipad") {
-        leases::release_owner(&owner);
+        abandon(&target);
         return Err(format!("a native Xcode app cannot be debugged on {}", target.family));
     }
     crate::focus_target(&target.id);

@@ -184,6 +184,8 @@ export type RunInventory = {
   androidDevices: RunTarget[];
   iosDevices: RunTarget[];
   targets: SimTarget[];
+  /** Udids of booted simulators nobody holds. Rust decides; the screen only offers to shut them. */
+  idle: string[];
 };
 
 export type GitState = {

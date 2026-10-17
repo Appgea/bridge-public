@@ -35,10 +35,12 @@
  * given, booted or not. The pick is saved per project across launches. A disconnected phone
  * stays selected until the user changes it, preventing an unexpected simulator launch.
  *
- * PANEL_MAX_SIMS (default 2) is a soft ceiling on simulator LEASES — runs and captures alike, so
- * a batch Panel cannot see no longer makes the count a lie. At capacity the row offers Queue or
- * an explicit Open another. Nothing running is silently evicted. Chrome, the Mac and an
- * already-booted device cost no seat: none of them spins up a virtual machine.
+ * PANEL_MAX_SIMS (default 4) is a soft ceiling on OPEN virtual devices: leased by a run, a debug
+ * session or a capture, or booted with no lease at all. The last kind is idle, usually a device
+ * an agent booted for a screenshot and left up. At capacity the row offers to shut the idle ones
+ * down, Queue, or an explicit Run anyway. The header offers the same shutdown at any time.
+ * Nothing in use is silently evicted. Chrome, the Mac and an already-booted device cost no seat:
+ * none of them spins up a virtual machine.
  *
  * State lives HERE, not in the DOM: sim lifecycle events are routed in via onSim() whether
  * or not the screen is up, so coming back always shows the truth.
@@ -136,6 +138,8 @@ export type RunnerEvents = {
   stop(sessionId: string): Promise<void>;
   /** Devices, leases, and runnable projects from one shared portfolio scan. */
   inventory(): Promise<RunInventory>;
+  /** Shut down every booted simulator nobody holds. Resolves with how many went down. */
+  closeIdle(): Promise<number>;
   /** Raise the window of the device at this address — Simulator.app for iOS, the emulator window
    *  for Android. With no address, Simulator.app, which is what a caller with no run means. */
   focus(address?: string): void;
@@ -265,6 +269,9 @@ export function mountRunner(host: HTMLElement, events: RunnerEvents): RunnerHand
    *  installed, which is the honest answer rather than an error. */
   let android: RunTarget[] = [];
   let ios: RunTarget[] = [];
+  /** Udids of booted simulators nobody holds, as Rust counts them. What "Shut down idle" offers. */
+  let idle: string[] = [];
+  let closingIdle = false;
   /** projectId -> the target the human picked, by ADDRESS (`ipad:<udid>`, `chrome`, …). Absent
    *  means Auto, which is the safe default: the app's own device, else a free powered-off one,
    *  never something already showing another app. An explicit pick is allowed to be a booted one
@@ -1036,7 +1043,7 @@ export function mountRunner(host: HTMLElement, events: RunnerEvents): RunnerHand
     const detail = kind === "queued"
       ? "Panel will launch it automatically."
       : kind === "capacity"
-        ? `${capacityBlocks.get(p.id)?.booted ?? 0} simulators are open. Queue it or explicitly use more memory.`
+        ? capacityDetail(capacityBlocks.get(p.id))
         : failedRun?.error ?? errors.get(p.id) ?? "The run could not start.";
     copy.append(projectIcon(p));
     const text = make("span", "run-attention-text");
@@ -1058,6 +1065,18 @@ export function mountRunner(host: HTMLElement, events: RunnerEvents): RunnerHand
         }),
       );
     } else if (kind === "capacity") {
+      // Idle devices are the cheapest seat there is: nobody is using them. Offered first, and
+      // only while there are some — the count is re-read, so a stale row never offers zero.
+      if (idle.length) {
+        const close = actionButton("run-close-idle", `Shut down ${idleLabel(idle.length)}`, "stop", () =>
+          void act(p.id, async () => {
+            await closeIdle();
+            await startRun(p.id, false);
+          }),
+        );
+        close.title = IDLE_TITLE;
+        actions.append(close);
+      }
       actions.append(
         actionButton("run-queue", "Queue", null, () => {
           capacityBlocks.delete(p.id);
@@ -1115,6 +1134,44 @@ export function mountRunner(host: HTMLElement, events: RunnerEvents): RunnerHand
       row.append(log);
     }
     return row;
+  };
+
+  const idleLabel = (count: number): string => `${count} idle simulator${count === 1 ? "" : "s"}`;
+  const IDLE_TITLE =
+    "Booted simulators no run, debug session or capture is using. Usually left up by an agent. " +
+    "An agent still using one will have to boot it again.";
+
+  const capacityDetail = (block: { booted: number; cap: number } | undefined): string => {
+    const open = block?.booted ?? 0;
+    const head = `${open} simulator${open === 1 ? " is" : "s are"} open, the limit is ${block?.cap ?? open}.`;
+    return idle.length
+      ? `${head} ${idle.length} of them ${idle.length === 1 ? "is" : "are"} idle.`
+      : `${head} Queue it or explicitly use more memory.`;
+  };
+
+  /** Shut the idle simulators down and re-read the inventory, so every count on screen is the
+   *  device list after the shutdown, not before it. */
+  const closeIdle = async (): Promise<void> => {
+    if (closingIdle) return;
+    closingIdle = true;
+    paintAll();
+    try {
+      await events.closeIdle();
+      await refreshInventory();
+    } finally {
+      closingIdle = false;
+      paintAll();
+    }
+  };
+
+  const paintIdleButton = (): void => {
+    const button = host.querySelector<HTMLButtonElement>(".run-head-status .run-close-idle");
+    if (!button) return;
+    button.hidden = !idle.length && !closingIdle;
+    button.disabled = closingIdle;
+    button.querySelector("span")!.textContent = closingIdle
+      ? "Shutting down…"
+      : `Shut down ${idleLabel(idle.length)}`;
   };
 
   const buildAppTile = (p: RunnerProject): HTMLElement => {
@@ -1454,6 +1511,8 @@ export function mountRunner(host: HTMLElement, events: RunnerEvents): RunnerHand
       const capacity = /SIM_CAPACITY\|(\d+)\|(\d+)/.exec(message);
       if (capacity) {
         capacityBlocks.set(projectId, { booted: Number(capacity[1]), cap: Number(capacity[2]) });
+        // The row offers to shut the idle ones down, so it needs the same list the header shows.
+        void refreshInventory();
         errors.delete(projectId);
         return "capacity";
       }
@@ -1530,6 +1589,7 @@ export function mountRunner(host: HTMLElement, events: RunnerEvents): RunnerHand
       devices.filter((device) => device.booted).length +
       android.filter((target) => target.booted && target.id.startsWith("android:@")).length;
     openCount.textContent = `${booted} open`;
+    paintIdleButton();
     queueCount.querySelector("span")!.textContent = `${queued.size} queued`;
     queueCount.hidden = queued.size === 0;
 
@@ -1670,6 +1730,7 @@ export function mountRunner(host: HTMLElement, events: RunnerEvents): RunnerHand
     leased = new Map(Object.entries(inventory.leases));
     android = inventory.androidDevices;
     ios = inventory.iosDevices ?? [];
+    idle = inventory.idle ?? [];
     absorbTargets(inventory.targets);
   };
 
@@ -1705,6 +1766,7 @@ export function mountRunner(host: HTMLElement, events: RunnerEvents): RunnerHand
         <div class="run-head-status">
           <span class="run-count run-open-count"><i></i><span></span></span>
           <span class="run-count run-queue-count"><i></i><span></span></span>
+          <button class="run-close-idle" type="button" hidden>${icon("stop")}<span></span></button>
           <button class="run-refresh-devices" type="button">Refresh devices</button>
           <button class="run-show-simulator" type="button">Show Simulator</button>
         </div>`;
@@ -1717,6 +1779,9 @@ export function mountRunner(host: HTMLElement, events: RunnerEvents): RunnerHand
       });
       head.querySelector<HTMLButtonElement>(".run-show-simulator")!
         .addEventListener("click", () => events.focus());
+      const closeIdleButton = head.querySelector<HTMLButtonElement>(".run-close-idle")!;
+      closeIdleButton.title = IDLE_TITLE;
+      closeIdleButton.addEventListener("click", () => void closeIdle());
 
       const deckSection = make("section", "run-section run-deck-section");
       const deckHead = make("header", "run-section-head");

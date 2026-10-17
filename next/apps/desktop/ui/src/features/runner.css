@@ -95,7 +95,8 @@
 .run-queue-count i { background: var(--warn); }
 .run-queue-count[hidden] { display: none; }
 
-.run-show-simulator {
+.run-show-simulator,
+.run-close-idle {
   padding: 5px 10px;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -104,6 +105,17 @@
   font-size: var(--text-xs);
   font-weight: 600;
 }
+/* Idle simulators are memory nobody is using. Warn-toned, like the queue count beside it. */
+.run-close-idle {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--warn);
+  border-color: color-mix(in oklab, var(--warn) 38%, var(--line));
+}
+.run-close-idle .ui-icon { width: 11px; height: 11px; }
+.run-close-idle[hidden] { display: none; }
+.run-close-idle:disabled { opacity: 0.6; cursor: wait; }
 .run-show-simulator:hover {
   transform: none;
   color: var(--ink);
@@ -539,6 +551,7 @@
   white-space: nowrap;
 }
 .run-attention-actions .run-queue,
+.run-attention-actions .run-close-idle,
 .run-attention-actions .run-extra { color: var(--warn); border-color: color-mix(in oklab, var(--warn) 38%, var(--line)); }
 .run-attention-actions .run-retry { color: var(--risk); border-color: color-mix(in oklab, var(--risk) 38%, var(--line)); }
 .run-attention > .run-log { flex-basis: 100%; }

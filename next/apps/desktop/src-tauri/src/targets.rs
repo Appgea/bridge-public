@@ -24,6 +24,7 @@ use crate::android;
 use crate::leases;
 use crate::sim;
 use serde::Serialize;
+use std::collections::{BTreeMap, HashSet};
 use std::path::Path;
 
 #[derive(Debug, Clone, Serialize)]
@@ -279,6 +280,26 @@ pub fn sim_family(name: &str) -> &'static str {
     }
 }
 
+/// Booted simulators nobody holds: no run, debug session or capture batch has a lease on them.
+/// Usually a device an agent booted for a screenshot or a test and never shut down. Each holds
+/// one to five gigabytes, so the cap counts them and the Run screen offers to shut them down.
+///
+/// Matched on the udid, not the address. A lease names the device as `iphone:` or `ipad:`, and
+/// which of the two is a property of the name, not of the device being in use.
+pub fn idle_simulators(
+    sims: &[sim::SimDevice],
+    held: &BTreeMap<String, leases::Lease>,
+) -> Vec<sim::SimDevice> {
+    let leased: HashSet<&str> = held
+        .keys()
+        .filter_map(|address| address.split_once(':').map(|(_, id)| id))
+        .collect();
+    sims.iter()
+        .filter(|device| device.booted && !leased.contains(device.udid.as_str()))
+        .cloned()
+        .collect()
+}
+
 /// Every Android target on this machine — attached phones, running emulators, and the AVDs that
 /// are merely defined. A powered-off AVD carries no `device` yet: its serial does not exist until
 /// it boots, and `run_on` is what fills that in.
@@ -433,4 +454,50 @@ pub fn free_in_family(family: &str, owner: &str) -> Option<Target> {
         .or_else(|| idle.first().copied())
         .or_else(|| free.first())
         .cloned()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn sim(udid: &str, name: &str, booted: bool) -> sim::SimDevice {
+        sim::SimDevice {
+            udid: udid.into(),
+            name: name.into(),
+            runtime: "iOS 26.1".into(),
+            booted,
+        }
+    }
+
+    fn lease(kind: &str) -> leases::Lease {
+        leases::Lease {
+            owner: "Tavla".into(),
+            kind: kind.into(),
+            pid: 1,
+            since: 0,
+            family: "iphone".into(),
+            name: "iPhone 17".into(),
+            booted_by_us: false,
+        }
+    }
+
+    #[test]
+    fn only_a_booted_simulator_nobody_holds_is_idle() {
+        let sims = vec![
+            sim("RUN", "iPhone 17", true),
+            sim("CAPTURE", "iPad Pro", true),
+            sim("AGENT", "Koza Showcase", true),
+            sim("OFF", "iPhone Air", false),
+        ];
+        let mut held = BTreeMap::new();
+        held.insert("iphone:RUN".to_string(), lease("interactive"));
+        // Held under the other family's prefix: still held. The udid is what is in use.
+        held.insert("iphone:CAPTURE".to_string(), lease("capture"));
+        held.insert("chrome".to_string(), lease("interactive"));
+        let idle: Vec<String> = idle_simulators(&sims, &held)
+            .into_iter()
+            .map(|device| device.udid)
+            .collect();
+        assert_eq!(idle, vec!["AGENT".to_string()]);
+    }
 }

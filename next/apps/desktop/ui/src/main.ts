@@ -3741,7 +3741,9 @@ async function boot(): Promise<void> {
         androidDevices: [],
         iosDevices: [],
         targets: [],
+        idle: [],
       })),
+    closeIdle: () => invoke<number>("close_idle_sims").catch(() => 0),
     // The address decides WHAT gets raised: Simulator.app for an iOS run, the emulator window for
     // an Android one, nothing at all for a phone on the desk. Without one, Rust falls back to
     // Simulator.app — which is what a caller with no run in hand means.

@@ -1899,6 +1899,9 @@ async fn start_sim(
     // A restart pins the target: the point is to rebuild *this* run, and letting Auto re-pick
     // would silently move the app to another device mid-debug.
     let mut pinned: Option<String> = None;
+    // The replaced run's simulator, when Panel booted it: (address, udid). Panel still owes that
+    // memory back, so the ownership moves to the new run instead of being lost with the old one.
+    let mut inherited: Option<(String, String)> = None;
     if !extra_instance {
         let live = state
             .sims
@@ -1920,16 +1923,24 @@ async fn start_sim(
             let existing = state.sessions.lock().unwrap().get(&session_id).cloned();
             match existing {
                 Some(session) if restart => {
-                    // Reap the old PTY and hand its lease back before taking the same target
-                    // again. Order matters: the lease must be free at the moment we re-take it,
-                    // or the run would collide with the corpse of itself.
+                    // Untrack the old run BEFORE reaping its PTY. The sink cleans up a run it still
+                    // tracks, and for a simulator Panel booted that means shutting it down, which
+                    // here would cold-boot the same device a second later. When that shutdown lost
+                    // the race, the new run saw a booted device, decided somebody else owned it,
+                    // and its Stop left the simulator running.
                     let terminal_id = session.terminal_id.clone();
+                    let meta = state.sims.lock().unwrap().remove(&session_id);
                     let closing = state.terminals.lock().unwrap().take(&terminal_id);
                     if let Some(closing) = closing {
                         off_main(move || Ok(closing.end())).await?;
                     }
-                    if let Some(meta) = state.sims.lock().unwrap().remove(&session_id) {
+                    // Handed back only now that the old process is gone: the lease must be free at
+                    // the moment we re-take it, and not a moment while the corpse still holds it.
+                    if let Some(meta) = meta {
                         leases::release_owner(&meta.owner);
+                        if meta.booted_by_us && !meta.device_id.is_empty() {
+                            inherited = Some((meta.address, meta.device_id));
+                        }
                     }
                     state.sessions.lock().unwrap().remove(&session_id);
                     event_sink(&app)(sim::status_event(
@@ -2013,8 +2024,26 @@ async fn start_sim(
     .await?;
 
     // A device Panel starts is a device Panel owes back. One that was already up belongs to
-    // whoever had it, and tidying somebody else's desk is not this program's job.
-    let booted_by_us = boots_devices(&target.family) && !target.booted;
+    // whoever had it, and tidying somebody else's desk is not this program's job. A restart on
+    // the device the old run booted inherits that debt. A restart that moved elsewhere pays it
+    // now, or the old simulator would stay up with nobody owing it.
+    let inherited = match inherited {
+        Some((address, _)) if address == target.id => true,
+        Some((address, device_id)) => {
+            let still_used = state
+                .sims
+                .lock()
+                .unwrap()
+                .values()
+                .any(|other| other.device_id == device_id);
+            if !still_used {
+                release_device(&address, &device_id);
+            }
+            false
+        }
+        None => false,
+    };
+    let booted_by_us = inherited || (boots_devices(&target.family) && !target.booted);
 
     // Claim it before anything is booted or spawned. A capture batch asking for a device at this
     // instant must be told this one is taken, not handed it — and an Android cold boot is minutes
@@ -2049,7 +2078,7 @@ async fn start_sim(
         Ok(Some(serial)) => target.device = serial,
         Ok(None) => {}
         Err(error) => {
-            leases::release_owner(&owner);
+            abandon_start(&owner, booted_by_us, &target.id, &target.device);
             return Err(error);
         }
     }
@@ -2073,12 +2102,14 @@ async fn start_sim(
     let run = match off_main(move || sim::plan(&plan_root, &plan_device, &plan_family)).await {
         Ok(run) => run,
         Err(error) => {
-            leases::release_owner(&owner);
+            abandon_start(&owner, booted_by_us, &target.id, &target.device);
             return Err(error);
         }
     };
 
-    focus_target(&target.id);
+    // No raise here. The device comes forward once, when the app is running on it (the sink
+    // below). Raising at the start too pulled the device in front of the human for the whole
+    // build, and on Xcode 27 it was the wrong device.
 
     let session_id = uuid_v4();
     let run_kind = run.kind;
@@ -2179,12 +2210,14 @@ async fn start_sim(
     });
 
     let spec = SpawnSpec::shell(&run.cwd, cols, rows).run(run.program.clone(), run.args.clone());
-    let terminal_id = state
-        .terminals
-        .lock()
-        .unwrap()
-        .spawn(spec, sink.clone())
-        .map_err(|error| error.to_string())?;
+    let spawned = state.terminals.lock().unwrap().spawn(spec, sink.clone());
+    let terminal_id = match spawned {
+        Ok(terminal_id) => terminal_id,
+        Err(error) => {
+            abandon_start(&owner, booted_by_us, &target.id, &target.device);
+            return Err(error.to_string());
+        }
+    };
 
     // Track the run so its device can be released when the PTY ends, and so a later Run on this
     // app finds it instead of opening a second device.
@@ -2269,6 +2302,16 @@ async fn start_sim(
     })
 }
 
+/// A start that failed after taking its lease. The lease goes back, and so does a device this
+/// start booted: nothing will ever run on it, so nothing would ever shut it down. The PTY spawn
+/// failing used to skip both, holding the lease until Panel quit.
+fn abandon_start(owner: &str, booted_by_us: bool, address: &str, device_id: &str) {
+    leases::release_owner(owner);
+    if booted_by_us {
+        release_device(address, device_id);
+    }
+}
+
 /// Does this family have a device Panel turns on and off? The three questions that used to be
 /// spelled `matches!(family, "iphone" | "ipad")` all over this file are now these three helpers,
 /// because Android answers each of them differently and a literal repeated in three places is a
@@ -2283,7 +2326,9 @@ fn boots_devices(family: &str) -> bool {
 /// asked to see behind something unrelated.
 fn focus_target(address: &str) {
     match targets::family_of(address).as_str() {
-        "iphone" | "ipad" => sim::focus_simulator(),
+        "iphone" | "ipad" => {
+            sim::focus_simulator(address.split_once(':').map(|(_, udid)| udid).unwrap_or(""))
+        }
         "android" if android::is_emulator_address(address) => android::focus(),
         _ => {}
     }
@@ -2354,8 +2399,8 @@ fn auto_target(
         // phone on the desk do not spin up a virtual machine, so the ceiling has no business
         // stopping them.
         let costs_a_seat = !free.booted && virtual_device(&free.id);
-        if costs_a_seat && running_sims() >= cap && !allow_extra {
-            return Err(format!("SIM_CAPACITY|{}|{cap}", running_sims()));
+        if costs_a_seat && !allow_extra {
+            capacity_check(cap)?;
         }
         return Ok(free);
     }
@@ -2372,8 +2417,8 @@ fn auto_target(
         }
         return Err(format!("{home_family} is already in use"));
     }
-    if running_sims() >= cap && !allow_extra {
-        return Err(format!("SIM_CAPACITY|{}|{cap}", running_sims()));
+    if !allow_extra {
+        capacity_check(cap)?;
     }
     // Every device of the family is leased and the human has said yes to another. Clone one
     // rather than evict somebody.
@@ -2402,18 +2447,25 @@ fn virtual_device(address: &str) -> bool {
     }
 }
 
-/// How many virtual devices are spoken for right now — leased by a run or by a capture batch. The
-/// cap counts leases, not booted devices: a simulator the human booted in Xcode is theirs and is
-/// not Panel's to ration, while a capture batch Panel cannot see would make the count a lie.
+/// Refuse a new virtual device when the machine already has `cap` of them open, naming how many
+/// of those nobody is using. The UI turns `SIM_CAPACITY|open|cap|idle` into the capacity row,
+/// whose first answer is to shut the idle ones down.
 ///
-/// Emulators count too. They are the heaviest thing Run can start — an Android emulator holds
-/// more memory than an iOS simulator, not less — and a ceiling that ignored them would let two
-/// simulators and four emulators all be "within the cap".
-fn running_sims() -> usize {
-    leases::held()
-        .keys()
-        .filter(|address| virtual_device(address))
-        .count()
+/// Open means leased OR booted. Leases cover runs, debug sessions and capture batches, including
+/// a device leased and still booting. A booted simulator with no lease is usually one an agent
+/// booted for a screenshot and left up. Counting only leases let those pile up unseen: two of
+/// them held five gigabytes while the cap still said there was room for four more.
+///
+/// Emulators count through their leases. They are the heaviest thing Run can start, and a
+/// ceiling that ignored them would let two simulators and four emulators all be within the cap.
+fn capacity_check(cap: usize) -> Result<(), String> {
+    let held = leases::held();
+    let leased = held.keys().filter(|address| virtual_device(address)).count();
+    let idle = targets::idle_simulators(&sim::list_devices(), &held).len();
+    if leased + idle >= cap {
+        return Err(format!("SIM_CAPACITY|{}|{cap}|{idle}", leased + idle));
+    }
+    Ok(())
 }
 
 /// The number of simulator leases Panel recommends at once. It is a soft ceiling: reaching it
@@ -2425,6 +2477,41 @@ fn max_sims() -> usize {
         .and_then(|value| value.parse::<usize>().ok())
         .filter(|n| *n >= 1)
         .unwrap_or(4)
+}
+
+/// Shut down every simulator nobody holds — the Run screen's "Shut down idle", and the capacity
+/// row's answer to "too many open". Waited on, so the inventory read right after it is true.
+///
+/// The lease file is read again per device, just before its shutdown, so a capture batch that
+/// took one a moment ago keeps it.
+#[tauri::command]
+async fn close_idle_sims() -> Result<usize, String> {
+    off_main(|| {
+        let idle = targets::idle_simulators(&sim::list_devices(), &leases::held());
+        let closing: Vec<_> = idle
+            .into_iter()
+            .map(|device| {
+                std::thread::spawn(move || {
+                    let still_idle = targets::idle_simulators(
+                        std::slice::from_ref(&device),
+                        &leases::held(),
+                    );
+                    if still_idle.is_empty() {
+                        return false;
+                    }
+                    sim::shutdown_device_now(&device.udid);
+                    true
+                })
+            })
+            .collect();
+        // One thread per device: a shutdown takes a second or two, and they do not share one.
+        Ok(closing
+            .into_iter()
+            .filter_map(|thread| thread.join().ok())
+            .filter(|closed| *closed)
+            .count())
+    })
+    .await
 }
 
 /// Simulator inventory for the Run screen. simctl subprocess -> off the main thread.
@@ -2477,6 +2564,9 @@ struct RunInventory {
     android_devices: Vec<targets::Target>,
     ios_devices: Vec<targets::Target>,
     targets: Vec<SimTarget>,
+    /// Udids of booted simulators nobody holds (`targets::idle_simulators`). The Run screen
+    /// offers to shut these down; it never decides for itself which devices are idle.
+    idle: Vec<String>,
 }
 
 fn sim_targets_from(
@@ -2553,12 +2643,18 @@ async fn run_inventory() -> Result<RunInventory, String> {
         let android_devices = targets::android_devices();
         let ios_devices = targets::ios_devices();
         let targets = sim_targets_from(&devices, &android_devices);
+        let leases = leases::held();
+        let idle = targets::idle_simulators(&devices, &leases)
+            .into_iter()
+            .map(|device| device.udid)
+            .collect();
         Ok(RunInventory {
             devices,
-            leases: leases::held(),
+            leases,
             android_devices,
             ios_devices,
             targets,
+            idle,
         })
     })
     .await
@@ -2587,7 +2683,7 @@ async fn sim_targets() -> Result<Vec<SimTarget>, String> {
 fn sim_focus(address: Option<String>) {
     match address {
         Some(address) if !address.is_empty() => focus_target(&address),
-        _ => sim::focus_simulator(),
+        _ => sim::focus_simulator(""),
     }
 }
 
@@ -3604,6 +3700,7 @@ fn main() {
             start_sim,
             list_simulators,
             run_inventory,
+            close_idle_sims,
             sim_targets,
             device_leases,
             android_targets,
