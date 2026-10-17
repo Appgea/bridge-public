@@ -23,11 +23,12 @@ pub const MADE_EVENT: &str = "panel-made";
 /// How long a file must stay unchanged before it counts as made.
 const SETTLE: Duration = Duration::from_millis(1200);
 
-/// Folders that only ever hold generated build output, caches or dependencies.
+/// Folders that only ever hold generated build output, caches, dependencies or test baselines.
+/// `goldens` and `failures` are Flutter golden tests: one run writes dozens of them.
 const SKIP: &[&str] = &[
     ".git", "node_modules", "build", "target", "dist", ".dart_tool", "Pods", "DerivedData",
     ".gradle", ".build", ".next", ".venv", "venv", "__pycache__", ".idea", ".symlinks",
-    "xcuserdata", ".cache",
+    "xcuserdata", ".cache", "goldens", "failures",
 ];
 
 #[derive(Clone, Serialize)]
@@ -167,6 +168,9 @@ mod tests {
         assert!(skipped(root, Path::new("/p/app/build/ios/icon.png")));
         assert!(!skipped(root, Path::new("/p/app/ios/Runner/Assets.xcassets/AppIcon.appiconset/a.png")));
         assert!(skipped(root, Path::new("/p/app/node_modules/x/logo.png")));
+        assert!(skipped(root, Path::new("/p/app/test/features/today/goldens/today.png")));
+        assert!(skipped(root, Path::new("/p/app/test/features/today/failures/today_isolatedDiff.png")));
+        assert!(!skipped(root, Path::new("/p/app/screenshots/e2e_01_welcome.png")));
         assert!(skipped(root, Path::new("/p/app/.shots/home.png.tmp")));
         assert!(skipped(root, Path::new("/elsewhere/a.png")));
     }

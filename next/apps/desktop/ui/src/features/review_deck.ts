@@ -9,11 +9,11 @@
  *   G      looks good               C       needs changes (a short note)
  *   Esc    close
  */
-import { projectAssetUrl } from "../project-assets";
-
 export type DeckItem = {
   project: string;
   path: string;
+  /** The URL to load it from, versioned so a re-render is not served from cache. */
+  src: string;
   /** Shown under the media and used in the feedback. */
   label: string;
   kind: "image" | "audio" | "video";
@@ -189,7 +189,7 @@ export function openReviewDeck(items: DeckItem[], start: number, options: DeckOp
     tile.title = item.label;
     if (item.kind === "image") {
       const image = make("img");
-      image.src = projectAssetUrl(item.project, item.path);
+      image.src = item.src;
       image.alt = "";
       image.loading = "lazy";
       tile.append(image);
@@ -218,7 +218,7 @@ export function openReviewDeck(items: DeckItem[], start: number, options: DeckOp
     const card = make("div", "rd-audio");
     const audio = make("audio");
     audio.preload = "auto";
-    audio.src = projectAssetUrl(item.project, item.path);
+    audio.src = item.src;
     const play = make("button", "rd-play");
     play.type = "button";
     play.setAttribute("aria-label", "Play");
@@ -263,13 +263,13 @@ export function openReviewDeck(items: DeckItem[], start: number, options: DeckOp
     let body: HTMLElement;
     if (item.kind === "image") {
       const image = make("img", "rd-image");
-      image.src = projectAssetUrl(item.project, item.path);
+      image.src = item.src;
       image.alt = item.label;
       image.addEventListener("error", () => frame.classList.add("is-missing"), { once: true });
       body = image;
     } else if (item.kind === "video") {
       const video = make("video", "rd-video");
-      video.src = projectAssetUrl(item.project, item.path);
+      video.src = item.src;
       video.controls = true;
       video.autoplay = true;
       player = video;
@@ -286,7 +286,7 @@ export function openReviewDeck(items: DeckItem[], start: number, options: DeckOp
     next.disabled = false;
     // Preload the next picture so the flip is instant.
     const after = items[index + 1];
-    if (after?.kind === "image") new Image().src = projectAssetUrl(after.project, after.path);
+    if (after?.kind === "image") new Image().src = after.src;
     paintStrip();
   }
 

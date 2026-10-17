@@ -1144,8 +1144,9 @@ function dropSupport(): void {
 }
 
 /** Review: what the agents made, across every project. Mounted at boot so the badge counts files
- *  that land while you are elsewhere. */
-function showReview(): void {
+ *  that land while you are elsewhere. From a project, it goes straight into that project's work. */
+function showReview(projectId?: string): void {
+  if (projectId && review.openProject(projectId)) return;
   dropSupport();
   dropSettings();
   dropChat();
@@ -2135,7 +2136,7 @@ async function runRowAction(id: string, action: RowAction | null): Promise<void>
       await select(id, "files");
       return;
     case "review":
-      showReview();
+      showReview(id);
       return;
     default:
       await select(id);
@@ -2187,7 +2188,7 @@ function cardModel(here: ProjectState): CardModel {
 
   const actions: CardAction[] = [];
   if (attentionOf(here) === "done") actions.push({ label: "Open diff", run: () => void select(id, "files"), primary: true });
-  if (facts.reviews) actions.push({ label: `Review ${facts.reviews}`, run: () => showReview(), primary: !actions.length });
+  if (facts.reviews) actions.push({ label: `Review ${facts.reviews}`, run: () => showReview(id), primary: !actions.length });
   actions.push(
     live
       ? { label: "Open agent", run: () => void runRowAction(id, "claude"), primary: !actions.length }

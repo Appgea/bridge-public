@@ -25,7 +25,8 @@ type Made = {
   modified: number;
 };
 
-type Item = Made & { seen: boolean };
+/** `at` is when Panel heard of it. A file's own mtime can be days old: a download, an unzip, a copy. */
+type Item = Made & { seen: boolean; at: number };
 
 export type ReviewEvents = {
   projectName(id: string): string;
@@ -44,14 +45,16 @@ export type ReviewEvents = {
 };
 
 export type ReviewHandle = {
+  /** Go straight into a project's newest batch. False when it has nothing waiting. */
+  openProject(project: string): boolean;
   open(): void;
   clear(): void;
 };
 
 const STORE = "panel-review";
 const CAP = 400;
-/** Files from one project this close together are one batch of work. */
-const BATCH_GAP = 3 * 60_000;
+/** Files from one project this close together are one batch of work: a sitting, not a single render. */
+const BATCH_GAP = 30 * 60_000;
 /** Tiles a batch shows before the rest fold into one "+N more" tile. Twelve fills 2, 3, 4 or 6 columns. */
 const SHOWN = 12;
 /** A folder that wrote this many files in one batch is a pipeline step: one tile for all of it. */
@@ -65,6 +68,9 @@ const make = <K extends keyof HTMLElementTagNameMap>(tag: K, className = "", tex
 };
 
 const fileName = (path: string): string => path.slice(path.lastIndexOf("/") + 1);
+
+/** The version in the URL: the protocol ignores it, the webview's cache does not, so a re-render shows. */
+const src = (item: Made): string => `${projectAssetUrl(item.project, item.path)}?v=${item.modified}`;
 
 /** Names the way Finder sorts them: shot_2 before shot_10. */
 const byName = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
@@ -91,7 +97,7 @@ function count(items: Item[]): string {
 function load(): Map<string, Item> {
   try {
     const saved = JSON.parse(localStorage.getItem(STORE) ?? "[]") as Item[];
-    return new Map(saved.map((item) => [item.path, item]));
+    return new Map(saved.map((item) => [item.path, { ...item, at: item.at ?? item.modified }]));
   } catch {
     return new Map();
   }
@@ -104,7 +110,7 @@ export function mountReview(screen: HTMLElement, events: ReviewEvents): ReviewHa
   let undo: { items: Item[]; timer: number } | null = null;
 
   const save = (): void => {
-    const newest = [...items.values()].sort((a, b) => b.modified - a.modified).slice(0, CAP);
+    const newest = [...items.values()].sort((a, b) => b.at - a.at).slice(0, CAP);
     items.clear();
     for (const item of newest) items.set(item.path, item);
     try {
@@ -130,7 +136,7 @@ export function mountReview(screen: HTMLElement, events: ReviewEvents): ReviewHa
 
   void listen<Made>("panel-made", ({ payload }) => {
     // A re-render of the same file is news again: it moves up and is unseen.
-    items.set(payload.path, { ...payload, seen: openState });
+    items.set(payload.path, { ...payload, seen: openState, at: Date.now() });
     save();
     announce();
     if (openState) paint();
@@ -156,12 +162,12 @@ export function mountReview(screen: HTMLElement, events: ReviewEvents): ReviewHa
 
   /** Newest batch first. Time decides where a batch ends; inOrder decides the order inside it. */
   function batches(): Item[][] {
-    const sorted = [...items.values()].sort((a, b) => b.modified - a.modified);
+    const sorted = [...items.values()].sort((a, b) => b.at - a.at);
     const out: Item[][] = [];
     const current = new Map<string, Item[]>();
     for (const item of sorted) {
       const batch = current.get(item.project);
-      if (batch && batch[batch.length - 1].modified - item.modified <= BATCH_GAP) {
+      if (batch && batch[batch.length - 1].at - item.at <= BATCH_GAP) {
         batch.push(item);
         continue;
       }
@@ -174,6 +180,8 @@ export function mountReview(screen: HTMLElement, events: ReviewEvents): ReviewHa
 
   function dismiss(batch: Item[]): void {
     if (undo) window.clearTimeout(undo.timer);
+    // Only what was looked at: a file re-rendered meanwhile is a new item under the same path.
+    batch = batch.filter((item) => items.get(item.path) === item);
     for (const item of batch) items.delete(item.path);
     undo = { items: batch, timer: window.setTimeout(() => { undo = null; paint(); }, 8000) };
     save();
@@ -184,7 +192,7 @@ export function mountReview(screen: HTMLElement, events: ReviewEvents): ReviewHa
   function restore(): void {
     if (!undo) return;
     window.clearTimeout(undo.timer);
-    for (const item of undo.items) items.set(item.path, item);
+    for (const item of undo.items) if (!items.has(item.path)) items.set(item.path, item);
     undo = null;
     save();
     announce();
@@ -197,6 +205,7 @@ export function mountReview(screen: HTMLElement, events: ReviewEvents): ReviewHa
     const deckItems: DeckItem[] = batch.map((item) => ({
       project: item.project,
       path: item.path,
+      src: src(item),
       label: relative(item),
       kind: item.kind,
     }));
@@ -229,7 +238,7 @@ export function mountReview(screen: HTMLElement, events: ReviewEvents): ReviewHa
     node.title = relative(item);
     if (item.kind === "image") {
       const image = make("img");
-      image.src = projectAssetUrl(item.project, item.path);
+      image.src = src(item);
       image.alt = "";
       image.loading = "lazy";
       image.decoding = "async";
@@ -261,7 +270,7 @@ export function mountReview(screen: HTMLElement, events: ReviewEvents): ReviewHa
     const cover = [...group.items].reverse().find((item) => item.kind === "image");
     if (cover) {
       const image = make("img");
-      image.src = projectAssetUrl(cover.project, cover.path);
+      image.src = src(cover);
       image.alt = "";
       image.loading = "lazy";
       image.decoding = "async";
@@ -285,7 +294,7 @@ export function mountReview(screen: HTMLElement, events: ReviewEvents): ReviewHa
     const title = make("div", "rv-title");
     title.append(
       make("b", "", events.projectName(project)),
-      make("span", "", `${count(batch)} · ${ago(Math.max(...batch.map((item) => item.modified)))}`),
+      make("span", "", `${count(batch)} · ${ago(Math.max(...batch.map((item) => item.at)))}`),
     );
     const groups = folderGroups(batch);
     title.append(make("code", "rv-where", groups.length === 1 ? groups[0].folder : `${groups.length} folders`));
@@ -357,33 +366,43 @@ export function mountReview(screen: HTMLElement, events: ReviewEvents): ReviewHa
     const card = existing?.node ?? make("aside", "rv-peek");
     card.setAttribute("role", "status");
     card.classList.remove("is-leaving");
+    // Whatever is tapped opens: a face opens that file, anywhere else opens the batch from the top.
+    const reviewFrom = (path?: string): void => {
+      const latest = batches().find((candidate) => candidate[0].project === project);
+      if (!latest) return hidePeek(project);
+      review(latest, Math.max(0, latest.findIndex((item) => item.path === path)));
+    };
     const faces = make("div", "rv-peek-faces");
-    for (const item of batch.slice(-3)) {
-      const face = make("span", `rv-peek-face is-${item.kind}`);
+    // The newest three, the ones that made this card appear.
+    for (const item of [...batch].sort((a, b) => a.at - b.at).slice(-3)) {
+      const face = make("button", `rv-peek-face is-${item.kind}`);
+      face.type = "button";
+      face.title = relative(item);
       if (item.kind === "image") {
         const image = make("img");
-        image.src = projectAssetUrl(item.project, item.path);
+        image.src = src(item);
         image.alt = "";
         face.append(image);
       } else {
         face.textContent = item.kind === "audio" ? "♪" : "▶";
       }
+      face.addEventListener("click", (event) => {
+        event.stopPropagation();
+        reviewFrom(item.path);
+      });
       faces.append(face);
     }
     const text = make("div", "rv-peek-text");
     text.append(make("b", "", events.projectName(project)), make("span", "", `made ${count(batch)}`));
     const open = make("button", "rv-btn is-primary", "Review");
     open.type = "button";
-    open.addEventListener("click", () => {
-      const latest = batches().find((candidate) => candidate[0].project === project);
-      if (latest) review(latest);
-      else hidePeek(project);
-    });
+    card.onclick = () => reviewFrom();
     const done = make("button", "rv-peek-close", "×");
     done.type = "button";
     done.setAttribute("aria-label", "Seen, mark reviewed");
     done.title = "Seen — mark reviewed";
-    done.addEventListener("click", () => {
+    done.addEventListener("click", (event) => {
+      event.stopPropagation();
       const latest = batches().find((candidate) => candidate[0].project === project);
       hidePeek(project);
       if (latest) dismiss(latest);
@@ -449,6 +468,11 @@ export function mountReview(screen: HTMLElement, events: ReviewEvents): ReviewHa
   }
 
   return {
+    openProject(project) {
+      const newest = batches().find((batch) => batch[0].project === project);
+      if (newest) review(newest);
+      return Boolean(newest);
+    },
     open() {
       openState = true;
       hidePeek();
